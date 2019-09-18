@@ -80,7 +80,7 @@ class DaniNet(object):
         self.max_regional_expansion = 10  # max rate of regional expansion
         # self.loss_weight = (0.5, 0.0006, 0.0005, 0.08, 0.00008) #300 iteration
         # self.loss_weight = (0.3, 0.0006, 0.0005, 0.08, 0.08)  # 800 iteration
-        self.loss_weight = (0.2, 0.0006, 0.0005, 0.05, 0.03)  # 800 iteration
+        self.loss_weight = (0.2, 0.0002, 0.0005, 0.05, 0.05)  # 800 iteration
         self.map_disease = (0, 1, 2, 2, 2, 3)
         # 0)similarity with the image
         # 1)loss on guessing the image is not generated while it is
