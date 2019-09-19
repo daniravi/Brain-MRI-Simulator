@@ -57,17 +57,19 @@ def train_regressors():
 
 def main(_):
     conditioned_enabled = True
+    progression_enabled = True
+    outputFolder = 'test_PR_CD_TF'
     if FLAGS.phase == 0:
         exit()
         # train_regressors()
     if FLAGS.phase == 1:
-        training(FLAGS.slice)
+        training(FLAGS.slice, conditioned_enabled, progression_enabled)
     if FLAGS.phase == 2:
-        transfer_learning(FLAGS.slice, conditioned_enabled, 'sample_TF', 1000)
+        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000)
     if FLAGS.phase == 3:
-        testing(FLAGS.slice, conditioned_enabled, 'test_TF_CD')
+        testing(FLAGS.slice, conditioned_enabled, outputFolder)
     if FLAGS.phase == 4:
-        assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png')
+        assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', outputFolder)
 
 
 def testing(curr_slice, conditioned_enabled, output_dir):
@@ -93,7 +95,7 @@ def testing(curr_slice, conditioned_enabled, output_dir):
     tf.reset_default_graph()
 
 
-def transfer_learning(curr_slice, conditioned_enabled, output_dir, num_epochs):
+def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -114,21 +116,22 @@ def transfer_learning(curr_slice, conditioned_enabled, output_dir, num_epochs):
             use_init_model=FLAGS.use_init_model,
             n_epoch_to_save=num_epochs,
             conditioned_enabled=conditioned_enabled,
+            progression_enabled=progression_enabled
         )
     tf.reset_default_graph()
 
 
-def assemblyMri(fileName):
+def assemblyMri(fileName, folder):
     currSliceSlice = 103
     numb_Slice = 30
     a = np.ones((5, 1280, 1280), dtype=np.float)
     finalMri = np.ones((numb_Slice, 128, 128), dtype=np.int16)
     for i in range(0, numb_Slice):
-        a[0, :, :] = imread('./save/' + str(currSliceSlice - 2) + '/test/test_2_' + fileName)
-        a[1, :, :] = imread('./save/' + str(currSliceSlice - 1) + '/test/test_1_' + fileName)
-        a[2, :, :] = imread('./save/' + str(currSliceSlice) + '/test/test_0_' + fileName)
-        a[3, :, :] = imread('./save/' + str(currSliceSlice + 1) + '/test/test_-1_' + fileName)
-        a[4, :, :] = imread('./save/' + str(currSliceSlice + 2) + '/test/test_-2_' + fileName)
+        a[0, :, :] = imread('./save/' + str(currSliceSlice - 2) + '/' + folder + '/test_2_' + fileName)
+        a[1, :, :] = imread('./save/' + str(currSliceSlice - 1) + '/' + folder + '/test_1_' + fileName)
+        a[2, :, :] = imread('./save/' + str(currSliceSlice) + '/' + folder + '/test_0_' + fileName)
+        a[3, :, :] = imread('./save/' + str(currSliceSlice + 1) + '/' + folder + '/test_-1_' + fileName)
+        a[4, :, :] = imread('./save/' + str(currSliceSlice + 2) + '/' + folder + '/test_-2_' + fileName)
         MRIAll = a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
 
         index_progression = 9
@@ -139,7 +142,7 @@ def assemblyMri(fileName):
         nib.save(img, 'out.nii.gz')
 
 
-def training(curr_slice):
+def training(curr_slice, conditioned_enabled, progression_enabled):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -161,13 +164,17 @@ def training(curr_slice):
                 num_epochs=5,  # number of epochs
                 use_trained_model=FLAGS.use_trained_model,
                 use_init_model=False,
+                conditioned_enabled=conditioned_enabled,
+                progression_enabled=progression_enabled
             )
             print('\n\tPre-train is done! The training will start.')
             FLAGS.use_trained_model = True
         model.train(
             num_epochs=FLAGS.epoch,  # number of epochs
             use_trained_model=FLAGS.use_trained_model,
-            use_init_model=FLAGS.use_init_model
+            use_init_model=FLAGS.use_init_model,
+            conditioned_enabled=conditioned_enabled,
+            progression_enabled=progression_enabled
         )
     tf.reset_default_graph()
 
