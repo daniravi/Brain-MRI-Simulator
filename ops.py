@@ -103,7 +103,7 @@ def save_batch_images(
         image_value_range=(-1,1),   # value range of the input batch images
         size_frame=None     # size of the image matrix, number of images in each row and column
 ):
-    # transform the pixcel value to 0~1
+    # transform the pixel value to 0~1
     images = (batch_images - image_value_range[0]) / (image_value_range[-1] - image_value_range[0])
     if size_frame is None:
         auto_size = int(np.ceil(np.sqrt(images.shape[0])))
