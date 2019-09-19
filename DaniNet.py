@@ -19,15 +19,15 @@ class DaniNet(object):
                  num_input_channels=1,  # number of channels of input images
                  num_encoder_channels=64,  # number of channels of the first conv layer of encoder
                  num_z_channels=200,  # number of channels of the layer z (noise or code)
-                 num_progression_points=10,
+                 num_progression_points=10,  # number of progression classes
                  num_gen_channels=1024,  # number of channels of the first deconv layer of generator
                  enable_tile_label=True,  # enable to tile the label
                  tile_ratio=1.0,  # ratio of the length between tiled label and z
                  is_training=True,  # flag for training or testing mode
                  save_dir='./save',  # path to save checkpoints, samples, and summary
-                 output_dir='sample_TR',  # path to save checkpoints, samples, and summary
+                 output_dir='sample_TR',  # name for the folder where sample are generated
                  dataset_name='TrainingSetMRI',  # name of the dataset in the folder ./data
-                 slice_number=100
+                 slice_number=100  # current MRI slice to consider
                  ):
 
         self.session = session
@@ -72,15 +72,11 @@ class DaniNet(object):
         # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
         #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
         self.age_intervals = [63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87]
-        self.bin_variance_scale = 0.3
-        # self.minimum_input_similarity = 0.001 #300 iteration
-        # self.minimum_input_similarity = 0.0000001
-        self.minimum_input_similarity = 0.00005
+        self.bin_variance_scale = 0.2
+        self.minimum_input_similarity = 0.00
         self.n_regions_can_be_processed = 10  # max number of region that can be processed at each iteration
         self.max_regional_expansion = 10  # max rate of regional expansion
-        # self.loss_weight = (0.5, 0.0006, 0.0005, 0.08, 0.00008) #300 iteration
-        # self.loss_weight = (0.3, 0.0006, 0.0005, 0.08, 0.08)  # 800 iteration
-        self.loss_weight = (0.2, 0.0002, 0.0005, 0.05, 0.05)  # 800 iteration
+        self.loss_weight = (2, 0.0002, 0.0005, 0.2, 0.05)  # 800 iteration
         self.map_disease = (0, 1, 2, 2, 2, 3)
         # 0)similarity with the image
         # 1)loss on guessing the image is not generated while it is
@@ -92,8 +88,6 @@ class DaniNet(object):
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
         self.bin_size = np.diff(self.bin_centers)
         self.bin_size = np.append(self.bin_size, self.bin_size[self.bin_size.size - 1])
-        # self.bin_size = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-        self.n_longitudinal_point_to_check = 7
         self.bin_centers_tensor = tf.constant(self.bin_centers)
 
         # ************************************* input to graph ********************************************************
@@ -237,6 +231,7 @@ class DaniNet(object):
               use_init_model=True,  # use the init model to initialize the network
               n_epoch_to_save=3,
               conditioned_enabled=True,
+              progression_enabled=True
               ):
         weights = self.loss_weight
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
@@ -244,10 +239,13 @@ class DaniNet(object):
         np.random.seed(seed=2017)
         if enable_shuffle:
             np.random.shuffle(file_names)
-
-        self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
-                       self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
-                       self.deformation_loss * weights[0]
+        if progression_enabled:
+            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                           self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
+                           self.deformation_loss * weights[0]
+        else:
+            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                           self.deformation_loss * weights[0]
 
         self.loss_Dz = self.D_z_loss_prior + self.D_z_loss_z
         self.loss_Di = self.D_img_loss_input + self.D_img_loss_G
@@ -397,8 +395,11 @@ class DaniNet(object):
 
                     # curr_gender = int(str(batch_files[i]).split('/')[-1].split('_')[1])
                     for t in range(self.num_progression_points):
-                        batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
-                                                                                  np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
+                        if progression_enabled:
+                            batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
+                                                                                      np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
+                        else:
+                            batch_fuzzy_membership[i, label] = self.image_value_range[-1]
                     if not use_init_model:
                         curr_diagnosis = random.randint(0, max(self.map_disease))
                     else:
@@ -743,27 +744,10 @@ class DaniNet(object):
         return self.rescales[current_region].inverse_transform(self.regressors[current_region].predict_proba(x))
 
     def check_next_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
-        select_random_regions = np.random.permutation(self.n_of_regions)  # cannot process all the region at each iteration
-        image1 = (frames_progression[index1, :, :, :] + 1) * self.ration_input_output_range
-        image2 = (frames_progression[index2, :, :, :] + 1) * self.ration_input_output_range
-        regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
-        regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
-
-        for i in range(0, self.n_regions_can_be_processed):
-            current_region = select_random_regions[i]
-            featureVector = tf.stack([
-                tf.cast(self.bin_centers_tensor[index1], tf.float32),
-                tf.cast(self.bin_centers_tensor[index2], tf.float32),
-                tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
-
-            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
-            intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
-            region_loss = region_loss + tf.reduce_min(
-                [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
-                          * tf.reduce_sum(self.allMask[:, :, current_region]) / (128 * 2)
+        region_loss = self.compute_region_loss(index1, index2, frames_progression, curr_diagnosis, region_loss)
         return [index1, tf.add(index2, 1), frames_progression, curr_diagnosis, region_loss]
 
-    def check_prev_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
+    def compute_region_loss(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
         select_random_regions = np.random.permutation(self.n_of_regions)  # cannot process all the region at each iteration
         image1 = (frames_progression[index1, :, :, :] + 1) * self.ration_input_output_range
         image2 = (frames_progression[index2, :, :, :] + 1) * self.ration_input_output_range
@@ -782,6 +766,10 @@ class DaniNet(object):
             region_loss = region_loss + tf.reduce_min(
                 [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
                           * tf.reduce_sum(self.allMask[:, :, current_region]) / (128 * 2)
+        return region_loss
+
+    def check_prev_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
+        region_loss = self.compute_region_loss(index1, index2, frames_progression, curr_diagnosis, region_loss)
         return [tf.add(index1, -1), index2, frames_progression, curr_diagnosis, region_loss]
 
     cond_1 = lambda self, index1, index2, frames_progression, curr_diagnosis, region_loss: index2 < self.num_progression_points
@@ -795,7 +783,6 @@ class DaniNet(object):
 
     def compute_physical_constrain(self, frames_progression, selected_query_images, curr_age, fuzzy_membership):
         pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
-        pixel_reg_loss = pixel_reg_loss / 2  # + self.voxel_based_constrain2(frames_progression) / 2
         # deformation loss
         deformation_loss = 0
         for i in range(self.num_progression_points):
@@ -803,32 +790,7 @@ class DaniNet(object):
             deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(intensity_rate_changeFrame - selected_query_images)) * \
                                (fuzzy_membership[i] + self.minimum_input_similarity)
 
-        return pixel_reg_loss / 2, deformation_loss
-
-    @staticmethod
-    def voxel_based_constrain2(frames_progression):
-        k = tf.constant([-1, 1], dtype=tf.float32)
-        kernel = tf.reshape(k, [int(k.shape[0]), 1, 1])
-        frames_progression_sum_new = tf.reshape(tf.transpose(tf.reshape(frames_progression, [10, 128 * 128])), [128 * 128, 10, 1])
-        phis_loss = tf.reduce_mean(tf.nn.conv1d(frames_progression_sum_new, kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(
-            tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 2, 4, 6, 8], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(
-            tf.nn.conv1d(tf.gather(frames_progression_sum_new, [1, 3, 5, 7, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 3, 6, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 4, 8], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [1, 5, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 6], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [1, 7], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [2, 8], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [3, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 7], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [1, 8], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [2, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [0, 8], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [1, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        phis_loss = phis_loss + tf.reduce_mean(tf.nn.conv1d(tf.gather(frames_progression_sum_new, [8, 9], axis=1), kernel, stride=1, padding="VALID") + 1)
-        return phis_loss / 300
+        return pixel_reg_loss, deformation_loss
 
     def voxel_based_constrain(self, frames_progression, selected_query_images, curr_age):
         # pixel loss
@@ -894,7 +856,8 @@ class DaniNet(object):
 
         self.D_img_loss_G = self.D_img_loss_G / self.numb_of_sample
         self.G_img_loss = self.G_img_loss / self.numb_of_sample
-        return loss_pixel_regression, loss_regional_regression / (self.n_regions_can_be_processed * self.numb_of_sample), loss_deformation
+        return loss_pixel_regression / self.numb_of_sample, loss_regional_regression / (self.n_regions_can_be_processed * self.numb_of_sample), \
+               loss_deformation / self.numb_of_sample
 
     def testing(self, testing_samples_dir, current_slice, conditioned_enabled):
         if not self.load_checkpoint():
