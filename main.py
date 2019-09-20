@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.pyplot import imread
 import nibabel as nib
 from scipy.misc import imread
+import os
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -39,7 +40,8 @@ def train_regressors():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     maxNumberOfRegion = 1000
-
+    if not os.path.isdir('Regressor'):
+        os.mkdir('Regressor')
     for j in range(40, 143):
         filehandler = open('Regressor/' + str(j), 'wb')
         pickle.dump([[], []], filehandler)
@@ -50,7 +52,8 @@ def train_regressors():
             with tf.Session(config=config):
                 model = progression_net(j)
                 if model.train_and_save(i):
-                    model.test(i)
+                    print(i)
+                    #model.test(i)
                 else:
                     break
 
