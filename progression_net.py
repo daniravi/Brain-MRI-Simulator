@@ -12,31 +12,34 @@ class progression_net(object):
         self.num_output = 1
         self.num_inputs = 4
         self.current_slice = current_slice
+        self.in_data = []
+        self.out_data = []
         self.load_matlab_data(current_slice)
         self.max_regional_expansion = 10  # same in the class DaniNet
         self.map_disease = (0, 1, 2, 2, 2, 3)  # same in the class DaniNet
 
+
     def test(self, i):
         filehandler = open('Regressor/' + str(self.current_slice), 'rb')
-        [self.allRegressor, self.allScaler] = pickle.load(filehandler)
+        [allRegressor, allScaler] = pickle.load(filehandler)
         filehandler.close()
         indexForCurrentRegion = (self.in_data[:, 3] == i + 1)
-        X = self.in_data[indexForCurrentRegion, :3]
+        X = np.float64(self.in_data[indexForCurrentRegion, :3])
         for j in range(np.size(X, 0)):
-            X[j, 2] = self.map_disease[np.int(X[j, 2]) - 1]
+            X[j, 2] = self.map_disease[np.int(X[j, 2]) - 1] +1
         Y = self.out_data[indexForCurrentRegion, :3]
-        result = self.allRegressor[i].predict_proba(X)
+        result = allRegressor[i].predict_proba(X)
         prediction = np.reshape(result[:, 0], [-1, 1])
-        #print(np.concatenate((X[:50, :], Y[:50], self.allScaler[i].inverse_transform(prediction[:50])), axis=1))
+        print(np.concatenate((X[:50, :], Y[:50], allScaler[i].inverse_transform(prediction[:50])), axis=1))
         return
 
     def train_and_save(self, i):
         filehandler = open('Regressor/' + str(self.current_slice), 'rb')
-        [self.allRegressor, self.allScaler] = pickle.load(filehandler)
+        [allRegressor, allScaler] = pickle.load(filehandler)
         filehandler.close()
 
         indexForCurrentRegion = (self.in_data[:, 3] == i + 1)
-        X = self.in_data[indexForCurrentRegion, :3]
+        X = np.float64(self.in_data[indexForCurrentRegion, :3])
         for j in range(np.size(X, 0)):
             X[j, 2] = self.map_disease[np.int(X[j, 2]) - 1] + 1
 
@@ -66,10 +69,10 @@ class progression_net(object):
 
         pipeline.fit(X, y_fina.ravel())
 
-        self.allRegressor.append(pipeline)
-        self.allScaler.append(y_n)
+        allRegressor.append(pipeline)
+        allScaler.append(y_n)
         filehandler = open('Regressor/' + str(self.current_slice), 'wb')
-        pickle.dump([self.allRegressor, self.allScaler], filehandler)
+        pickle.dump([allRegressor, allScaler], filehandler)
         filehandler.close()
         return 1
 
