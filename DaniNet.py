@@ -73,10 +73,10 @@ class DaniNet(object):
         #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
         self.age_intervals = [63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87]
         self.bin_variance_scale = 0.2
-        self.minimum_input_similarity = 0.00
-        self.n_regions_can_be_processed = 10  # max number of region that can be processed at each iteration
+        self.minimum_input_similarity = 0.0000001
+        self.n_regions_can_be_processed = 2  # max number of random region that can be processed at each iteration
         self.max_regional_expansion = 10  # max rate of regional expansion
-        self.loss_weight = (2, 0.0002, 0.0005, 0.2, 0.05)  # 800 iteration
+        self.loss_weight = (0.5, 0.00005, 0.0003, 0.1, 0.1)
         self.map_disease = (0, 1, 2, 2, 2, 3)
         # 0)similarity with the image
         # 1)loss on guessing the image is not generated while it is
@@ -223,7 +223,7 @@ class DaniNet(object):
 
     def train(self,
               num_epochs=200,  # number of epochs
-              learning_rate=0.0005,  # learning rate of optimizer
+              learning_rate=0.0003,  # learning rate of optimizer
               beta1=0.5,  # parameter for Adam optimizer
               decay_rate=1.0,  # learning rate decay (0, 1], 1 means no decay
               enable_shuffle=True,  # enable shuffle of the dataset
@@ -354,8 +354,8 @@ class DaniNet(object):
         for epoch in range(num_epochs):
             if enable_shuffle:
                 np.random.shuffle(file_names)
+            start_time = time.time()
             for ind_batch in range(num_batches):
-                start_time = time.time()
                 # read batch images and labels
                 batch_files = file_names[ind_batch * self.size_batch:(ind_batch + 1) * self.size_batch]
                 batch = [load_image(
@@ -441,18 +441,22 @@ class DaniNet(object):
                         self.z_prior: batch_z_prior
                     }
                 )
-
-                print("\nEpoch: [%3d/%3d] Batch: [%3d/%3d]\n" %
-                      (epoch + 1, num_epochs, ind_batch + 1, num_batches))
-                print("\tGi=%.4f\tDi=%.4f\tDiG=%.4f" % (Gi_err, Di_err, DiG_err))
-                print("\tPix=%.4f\tReg=%.4f\tSim=%.4f" % (Pix_err1, Reg_err2, Sim_err3))
-
-                # intensity_rate_change left run time
-                elapse = time.time() - start_time
-                time_left = ((num_epochs - epoch - 1) * num_batches + (num_batches - ind_batch - 1)) * elapse
-                print("\tTime left: %02d:%02d:%02d" %
-                      (int(time_left / 3600), int(time_left % 3600 / 60), time_left % 60))
-
+                #todo chechk if this is faster
+                # _, _, _,  = self.session.run(
+                #     fetches=[
+                #         self.EG_optimizer,
+                #         self.D_z_optimizer,
+                #         self.D_img_optimizer
+                #     ],
+                #     feed_dict={
+                #         self.input_image: batch_images,
+                #         self.age: batch_label_age,
+                #         self.age_index: batch_label_age_index,
+                #         self.fuzzy_membership: batch_fuzzy_membership,
+                #         self.diagnosis: batch_label_diagnosis,
+                #         self.z_prior: batch_z_prior
+                #     }
+                # )
                 # add to summary
                 summary = self.summary.eval(
                     feed_dict={
@@ -465,7 +469,11 @@ class DaniNet(object):
                     }
                 )
                 self.writer.add_summary(summary, self.EG_global_step.eval())
+            print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
 
+            # intensity_rate_change left run time
+            elapse = time.time() - start_time
+            print(time.strftime("Time: %H:%M:%S", time.gmtime(elapse)))
             # save sample images for each epoch
             name = '{:02d}.png'.format(epoch + 1)
             self.test(sample_images, sample_label_diagnosis, name)
@@ -488,7 +496,7 @@ class DaniNet(object):
         [self.regressors, self.rescales] = pickle.load(file_handler)
 
         self.n_of_regions = np.size(self.rescales)
-        if self.isOnCluster:
+        if self.isOnCluster:  # bug loading data file
             tmp = []
             for i in range(self.n_of_regions):
                 tmp.append(self.regressors[i][1])
@@ -733,12 +741,6 @@ class DaniNet(object):
             size_frame=[self.num_progression_points, size_sample]
         )
 
-    @staticmethod
-    def input_fn(featureVector):
-        return tf.estimator.inputs.numpy_input_fn(
-            x={'X': featureVector.eval().astype(np.float32)},
-            num_epochs=None,
-            shuffle=False)
 
     def normalized_regressors(self, current_region, x):
         return self.rescales[current_region].inverse_transform(self.regressors[current_region].predict_proba(x))
@@ -754,18 +756,19 @@ class DaniNet(object):
         regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
         regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
 
-        for i in range(0, self.n_regions_can_be_processed):
-            current_region = select_random_regions[i]
-            featureVector = tf.stack([
-                tf.cast(self.bin_centers_tensor[index1], tf.float32),
-                tf.cast(self.bin_centers_tensor[index2], tf.float32),
-                tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
+        # for i in range(0, self.n_regions_can_be_processed):
+        i = 0
+        current_region = select_random_regions[i]
+        featureVector = tf.stack([
+            tf.cast(self.bin_centers_tensor[index1], tf.float32),
+            tf.cast(self.bin_centers_tensor[index2], tf.float32),
+            tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
 
-            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
-            intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
-            region_loss = region_loss + tf.reduce_min(
-                [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
-                          * tf.reduce_sum(self.allMask[:, :, current_region]) / (128 * 2)
+        prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
+        intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
+        region_loss = region_loss + tf.reduce_min(
+            [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
+                      * tf.reduce_sum(self.allMask[:, :, current_region]) / (8 * 8)  # 8*8 is the avarage size of a brain region
         return region_loss
 
     def check_prev_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
@@ -776,14 +779,15 @@ class DaniNet(object):
     cond_2 = lambda self, index1, index2, frames_progression, curr_diagnosis, region_loss: index1 >= 0
 
     def compute_region_regres_loss(self, frames_progression, curr_diagnosis, curr_age):
+        #region loss
         region_loss = 0.0
         res = tf.while_loop(self.cond_1, self.check_next_longitud_points, [curr_age, curr_age + 1, frames_progression, curr_diagnosis, region_loss])
         res = tf.while_loop(self.cond_2, self.check_prev_longitud_points, [curr_age - 1, curr_age, frames_progression, curr_diagnosis, res[4]])
-        return res[4]
+        return res[4] / self.num_progression_points
 
     def compute_physical_constrain(self, frames_progression, selected_query_images, curr_age, fuzzy_membership):
-        pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
         # deformation loss
+        pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
         deformation_loss = 0
         for i in range(self.num_progression_points):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
@@ -793,7 +797,7 @@ class DaniNet(object):
         return pixel_reg_loss, deformation_loss
 
     def voxel_based_constrain(self, frames_progression, selected_query_images, curr_age):
-        # pixel loss
+        # voxel loss
         pixel_reg_loss = 0
         index1 = tf.reduce_min([curr_age, 8])
         intensity_rate_changeFrame = tf.reduce_max(tf.gather(frames_progression, [(tf.range(index1, self.num_progression_points))]), 1)
@@ -823,8 +827,6 @@ class DaniNet(object):
         loss_deformation = tf.constant(0, dtype=tf.float32)
 
         perm = np.random.permutation(self.numb_of_sample - 1) + 1
-        self.D_img_loss_G = 0
-        self.G_img_loss = 0
         tt = perm[0]
         image = images[(tt - 1) * self.numb_of_sample:tt * self.numb_of_sample, :, :, :]
         curr_age_index = age_index[(tt - 1) * self.numb_of_sample:tt * self.numb_of_sample]
@@ -835,10 +837,10 @@ class DaniNet(object):
         z = self.generator(self.encoder(query_images, True), data_query_labels, query_diagnosis, True)
         _, discriminator_result_on_sym = self.discriminator_img(z, data_query_labels, query_diagnosis, True)
 
-        self.D_img_loss_G = self.D_img_loss_G + tf.reduce_mean(
+        self.D_img_loss_G = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.zeros_like(discriminator_result_on_sym))
         )
-        self.G_img_loss = self.G_img_loss + tf.reduce_mean(
+        self.G_img_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.ones_like(discriminator_result_on_sym))
         )
 
@@ -854,8 +856,6 @@ class DaniNet(object):
             loss_regional_regression = loss_regional_regression + self.compute_region_regres_loss(frames_progression, curr_diagnosis_final, curr_age_final)
             loss_deformation = loss_deformation + c2
 
-        self.D_img_loss_G = self.D_img_loss_G / self.numb_of_sample
-        self.G_img_loss = self.G_img_loss / self.numb_of_sample
         return loss_pixel_regression / self.numb_of_sample, loss_regional_regression / (self.n_regions_can_be_processed * self.numb_of_sample), \
                loss_deformation / self.numb_of_sample
 
