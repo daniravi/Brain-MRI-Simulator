@@ -26,7 +26,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--phase', type=int, default=1)
-parser.add_argument('--epoch', type=int, default=1000, help='number of epochs')
+parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='training dataset name that stored in ./data')
 parser.add_argument('--savedir', type=str, default='save', help='dir of saving checkpoints and intermediate training results')
@@ -37,7 +37,7 @@ parser.add_argument('--slice', type=int, default=100, help='slice')
 FLAGS = parser.parse_args()
 
 
-def train_regressors(max_regional_expansion, map_disease):
+def train_regressors(max_regional_expansion, map_disease, classifier):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     maxNumberOfRegion = 1000
@@ -51,10 +51,10 @@ def train_regressors(max_regional_expansion, map_disease):
         for i in range(0, maxNumberOfRegion):
             tf.reset_default_graph()
             with tf.Session(config=config):
-                model = progression_net(j, max_regional_expansion, map_disease)
-                if model.train_and_save(i):
+                model = progression_net(current_slice=j, max_regional_expansion=max_regional_expansion, map_disease=map_disease, classifier=classifier)
+                if model.train_and_save(current_region=i):
                     print(i)
-                    # model.test(i)
+                    model.test(current_region=i)
                 else:
                     break
 
@@ -64,19 +64,23 @@ def main(_):
     progression_enabled = True
     outputFolder = 'test_PR_CD_TF'
     max_regional_expansion = 10
+    classifier = 0  # classifier 0 svr, 1 logistic regressor
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     map_disease = (0, 1, 2, 2, 2, 3)
     age_intervals = (63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
+
     if FLAGS.phase == 0:
-        exit()
-        # train_regressors(max_regional_expansion,map_disease)
+        train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, classifier=classifier)
     if FLAGS.phase == 1:
-        training(FLAGS.slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease, age_intervals)
+        training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
+                 max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 2:
-        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000, max_regional_expansion, map_disease, age_intervals)
+        transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled, output_dir='sample_TF',
+                          num_epochs=1000, max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 3:
-        testing(FLAGS.slice, conditioned_enabled, outputFolder, max_regional_expansion, map_disease, age_intervals)
+        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=outputFolder, max_regional_expansion=max_regional_expansion,
+                map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 4:
         assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', outputFolder)
     if FLAGS.phase == 5:
