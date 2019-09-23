@@ -37,7 +37,7 @@ parser.add_argument('--slice', type=int, default=100, help='slice')
 FLAGS = parser.parse_args()
 
 
-def train_regressors():
+def train_regressors(max_regional_expansion, map_disease):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     maxNumberOfRegion = 1000
@@ -51,7 +51,7 @@ def train_regressors():
         for i in range(0, maxNumberOfRegion):
             tf.reset_default_graph()
             with tf.Session(config=config):
-                model = progression_net(j)
+                model = progression_net(j, max_regional_expansion, map_disease)
                 if model.train_and_save(i):
                     print(i)
                     # model.test(i)
@@ -60,7 +60,6 @@ def train_regressors():
 
 
 def main(_):
-
     conditioned_enabled = True
     progression_enabled = True
     outputFolder = 'test_PR_CD_TF'
@@ -68,22 +67,23 @@ def main(_):
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     map_disease = (0, 1, 2, 2, 2, 3)
+    age_intervals = (63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
     if FLAGS.phase == 0:
         exit()
         # train_regressors(max_regional_expansion,map_disease)
     if FLAGS.phase == 1:
-        training(FLAGS.slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease)
+        training(FLAGS.slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease, age_intervals)
     if FLAGS.phase == 2:
-        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000, max_regional_expansion, map_disease)
+        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000, max_regional_expansion, map_disease, age_intervals)
     if FLAGS.phase == 3:
-        testing(FLAGS.slice, conditioned_enabled, outputFolder, max_regional_expansion, map_disease)
+        testing(FLAGS.slice, conditioned_enabled, outputFolder, max_regional_expansion, map_disease, age_intervals)
     if FLAGS.phase == 4:
         assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', outputFolder)
     if FLAGS.phase == 5:
-        g = GUI()
+        GUI()
 
 
-def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease):
+def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -97,7 +97,8 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
             slice_number=curr_slice,
             output_dir=output_dir,
             max_regional_expansion=max_regional_expansion,
-            map_disease=map_disease
+            map_disease=map_disease,
+            age_intervals=age_intervals
 
         )
         print('\n\tTesting Mode')
@@ -109,7 +110,7 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
     tf.reset_default_graph()
 
 
-def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs, max_regional_expansion, map_disease):
+def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs, max_regional_expansion, map_disease, age_intervals):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -123,7 +124,8 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, outp
             slice_number=curr_slice,
             output_dir=output_dir,
             max_regional_expansion=max_regional_expansion,
-            map_disease=map_disease
+            map_disease=map_disease,
+            age_intervals=age_intervals
         )
         print('\n\tTransfer learning mode')
         model.train(
@@ -158,7 +160,7 @@ def assemblyMri(fileName, folder):
         nib.save(img, 'out.nii.gz')
 
 
-def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease):
+def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease, age_intervals):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -172,7 +174,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_
             dataset_name=FLAGS.dataset,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
             max_regional_expansion=max_regional_expansion,
-            map_disease=map_disease
+            map_disease=map_disease,
+            age_intervals=age_intervals
         )
 
         print('\n\tTraining Mode')
