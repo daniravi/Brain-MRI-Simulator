@@ -43,7 +43,7 @@ def fc(input_vector, num_output_length, name='fc'):
         return tf.matmul(input_vector, w) + b
 
 
-def deconv2d(input_map, output_shape, size_kernel=5, stride=2, stddev=0.02, name='deconv2d'):
+def deconv2d(input_map, output_shape, size_kernel=5, stride=2, name='deconv2d'):
     with tf.variable_scope(name):
         # stddev = np.sqrt(1.0 / (np.sqrt(input_map.get_shape()[-1].value * output_shape[-1]) * size_kernel ** 2))
         stddev = .02
