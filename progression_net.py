@@ -44,10 +44,10 @@ class progression_net(object):
     def train_and_save(self, current_region):
         [all_regressor, all_scaler] = self.load_regressor()
         X, y = self.load_region_data(current_region)
-        corectIndex = [y < self.max_regional_expansion]
+        correct_index = [y < self.max_regional_expansion]
 
-        y = y[np.reshape(corectIndex, (-1))]
-        X = X[np.reshape(corectIndex, (-1)), :]
+        y = y[np.reshape(correct_index, (-1))]
+        X = X[np.reshape(correct_index, (-1)), :]
         if self.classifier == 0:
             clf = SVR(C=100, coef0=0.0, degree=1, epsilon=0.005, gamma='auto',
                       kernel='linear', max_iter=-1, shrinking=True, tol=0.000001, verbose=True)
