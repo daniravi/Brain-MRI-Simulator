@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog
 import skfuzzy
-import sys
 
 class GUI(object):
     def __init__(self):
@@ -44,11 +43,11 @@ class GUI(object):
         plt.text(-100, -5, "g(i)", fontsize=14)
         plt.text(50, -5, "g(i)-x", fontsize=14)
 
-        resetax = plt.axes([0.1, 0.9, 0.1, 0.05])
-        self.button = Button(resetax, 'Load', color='lightgoldenrodyellow', hovercolor='0.975')
+        ax_position = plt.axes(rect=[0.1, 0.9, 0.1, 0.05])
+        self.button = Button(ax_position, 'Load', color='lightgoldenrodyellow', hovercolor='0.975')
 
-        resetax = plt.axes([0.45, 0.12, 0.1, 0.05])
-        self.buttonAnimate = Button(resetax, 'Simulation', color='lightgoldenrodyellow', hovercolor='0.975')
+        ax_position = plt.axes(rect=[0.45, 0.12, 0.1, 0.05])
+        self.buttonAnimate = Button(ax_position, 'Simulation', color='lightgoldenrodyellow', hovercolor='0.975')
         self.ageIncrement = 0.5
         self.button.on_clicked(self.reset)
         self.buttonAnimate.on_clicked(self.animate)
@@ -69,7 +68,6 @@ class GUI(object):
         self.label_current_age_to_show.on_changed(self.updateAge)
         self.update()
         plt.show()
-        #self.root.mainloop()
 
 
 
@@ -78,7 +76,7 @@ class GUI(object):
         self.update()
         return val
 
-    def reset(self,event):
+    def reset(self,_):
         file_path=self.open_new_mri()
         self.real_age = float(str(file_path).split('/')[-1].split('_')[1])
         self.curr_diagnosis = int(str(file_path).split('/')[-1].split('_')[3]) - 1
@@ -143,7 +141,7 @@ class GUI(object):
 
 
 
-    def animate(self, event):
+    def animate(self,_):
         while self.label_current_age_to_show.val < self.bin_centers[-1]:
             self.label_current_age_to_show.set_val(self.label_current_age_to_show.val + self.ageIncrement)
             self.update()
@@ -152,10 +150,3 @@ class GUI(object):
         while self.label_current_age_to_show.val > self.age_intervals[0]:
             self.label_current_age_to_show.set_val(self.label_current_age_to_show.val - self.ageIncrement)
             self.update()
-
-
-    def quit(self):
-       self.quit()
-       plt.close(self.fig)
-       exit()
-       sys.exit()
