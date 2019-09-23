@@ -27,7 +27,10 @@ class DaniNet(object):
                  save_dir='./save',  # path to save checkpoints, samples, and summary
                  output_dir='sample_TR',  # name for the folder where sample are generated
                  dataset_name='TrainingSetMRI',  # name of the dataset in the folder ./data
-                 slice_number=100  # current MRI slice to consider
+                 slice_number=100,  # current MRI slice to consider
+                 max_regional_expansion=10,
+                 map_disease=(0, 1, 2, 2, 2, 3),
+                 age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
                  ):
 
         self.session = session
@@ -46,6 +49,8 @@ class DaniNet(object):
         self.tile_ratio = tile_ratio
         self.is_training = is_training
         self.slice_number = slice_number
+        self.map_disease = map_disease
+        self.max_regional_expansion = max_regional_expansion  # max rate of regional expansion
         self.save_dir = save_dir + '/' + str(slice_number)
         self.output_dir = output_dir
         self.dataset_name = dataset_name + '/' + str(slice_number)
@@ -64,22 +69,17 @@ class DaniNet(object):
         self.D_img_loss_G = 0
         self.G_img_loss = 0
         self.n_of_regions = 0
-        self.isOnCluster = False
         self.numb_of_sample = int(np.sqrt(size_batch))
+        self.n_of_diagnosis = np.size(np.unique(map_disease))
 
         # ****************************************** Framework Parameters ***************************************************
-        self.n_of_diagnosis = 4
-        # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
-        #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
-        self.age_intervals = [63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87]
+        self.age_intervals = age_intervals
         self.bin_variance_scale = 0.2
-        self.minimum_input_similarity = 0.0000001
-        self.n_regions_can_be_processed = 2  # max number of random region that can be processed at each iteration
-        self.max_regional_expansion = 10  # max rate of regional expansion
-        self.loss_weight = (0.5, 0.00005, 0.0003, 0.1, 0.1)
-        self.map_disease = (0, 1, 2, 2, 2, 3)
+        self.minimum_input_similarity = 0.0000000
+        self.n_regions_can_be_processed = 5  # max number of random region that can be processed at each iteration
+        self.loss_weight = (1, 0.000001, 0.0004, 0.2, 0.2)
         # 0)similarity with the image
-        # 1)loss on guessing the image is not generated while it is
+        # 1)realistic image (smaller is more realistic)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different),
         # 3)pixel loss
         # 4)regional loss
@@ -299,41 +299,12 @@ class DaniNet(object):
 
         self.writer = tf.summary.FileWriter(os.path.join(self.save_dir, 'summary'), self.session.graph)
 
-        # ************* get some random samples as testing data to visualize the learning process *********************
-        sample_files = file_names[0:self.size_batch]
-        # file_names[0:self.size_batch] = []
-        sample = [load_image(
-            image_path=sample_file,
-            image_size=self.size_image,
-            image_value_range=self.image_value_range,
-            is_gray=(self.num_input_channels == 1),
-        ) for sample_file in sample_files]
-        if self.num_input_channels == 1:
-            sample_images = np.array(sample).astype(np.float32)[:, :, :, None]
-        else:
-            sample_images = np.array(sample).astype(np.float32)
-
-        sample_label_diagnosis = np.ones(
-            shape=(len(sample_files), self.n_of_diagnosis),
-            dtype=np.float32
-        ) * self.image_value_range[0]
-        for i, label in enumerate(sample_files):
-            if not use_init_model:
-                curr_diagnosis = random.randint(0, max(self.map_disease))
-            else:
-                curr_diagnosis = self.map_disease[int(str(sample_files[i]).split('/')[-1].split('_')[2]) - 1]
-            if conditioned_enabled:
-                sample_label_diagnosis[i, curr_diagnosis] = self.image_value_range[-1]
-            else:
-                sample_label_diagnosis[i, 0] = self.image_value_range[-1]
 
         # ******************************************* training *******************************************************
         # initialize the graph
-
         tf.global_variables_initializer().run()
 
         # load check point
-
         if use_trained_model:
             if self.load_checkpoint():
                 print("\tSUCCESS ^_^")
@@ -349,8 +320,14 @@ class DaniNet(object):
                             raise Exception('Error joining files')
                     self.load_checkpoint(model_path='init_model')
 
-                # epoch iteration
         num_batches = len(file_names) // self.size_batch
+
+        batch_images = []
+        batch_label_age = []
+        batch_fuzzy_membership = []
+        batch_label_age_index = []
+        batch_label_diagnosis = []
+        batch_z_prior = []
         for epoch in range(num_epochs):
             if enable_shuffle:
                 np.random.shuffle(file_names)
@@ -416,21 +393,11 @@ class DaniNet(object):
                     [self.size_batch, self.num_z_channels]
                 ).astype(np.float32)
 
-                # update
-                _, _, _, Pix_err1, Reg_err2, Sim_err3, Ez_err, Dz_err, Dzp_err, Gi_err, DiG_err, Di_err = self.session.run(
+                _, _, _, = self.session.run(
                     fetches=[
                         self.EG_optimizer,
                         self.D_z_optimizer,
-                        self.D_img_optimizer,
-                        self.pixel_regres_loss,
-                        self.region_regres_loss,
-                        self.deformation_loss,
-                        self.E_z_loss,
-                        self.D_z_loss_z,
-                        self.D_z_loss_prior,
-                        self.G_img_loss,
-                        self.D_img_loss_G,
-                        self.D_img_loss_input
+                        self.D_img_optimizer
                     ],
                     feed_dict={
                         self.input_image: batch_images,
@@ -441,43 +408,24 @@ class DaniNet(object):
                         self.z_prior: batch_z_prior
                     }
                 )
-                #todo chechk if this is faster
-                # _, _, _,  = self.session.run(
-                #     fetches=[
-                #         self.EG_optimizer,
-                #         self.D_z_optimizer,
-                #         self.D_img_optimizer
-                #     ],
-                #     feed_dict={
-                #         self.input_image: batch_images,
-                #         self.age: batch_label_age,
-                #         self.age_index: batch_label_age_index,
-                #         self.fuzzy_membership: batch_fuzzy_membership,
-                #         self.diagnosis: batch_label_diagnosis,
-                #         self.z_prior: batch_z_prior
-                #     }
-                # )
-                # add to summary
-                summary = self.summary.eval(
-                    feed_dict={
-                        self.input_image: batch_images,
-                        self.age: batch_label_age,
-                        self.age_index: batch_label_age_index,
-                        self.fuzzy_membership: batch_fuzzy_membership,
-                        self.diagnosis: batch_label_diagnosis,
-                        self.z_prior: batch_z_prior
-                    }
-                )
-                self.writer.add_summary(summary, self.EG_global_step.eval())
+            # add to summary
+            summary = self.summary.eval(
+                feed_dict={
+                    self.input_image: batch_images,
+                    self.age: batch_label_age,
+                    self.age_index: batch_label_age_index,
+                    self.fuzzy_membership: batch_fuzzy_membership,
+                    self.diagnosis: batch_label_diagnosis,
+                    self.z_prior: batch_z_prior
+                }
+            )
+            self.writer.add_summary(summary, self.EG_global_step.eval())
             print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
-
-            # intensity_rate_change left run time
             elapse = time.time() - start_time
             print(time.strftime("Time: %H:%M:%S", time.gmtime(elapse)))
             # save sample images for each epoch
             name = '{:02d}.png'.format(epoch + 1)
-            self.test(sample_images, sample_label_diagnosis, name)
-
+            self.test(batch_images, batch_label_diagnosis, name)
             # save checkpoint for each 3 epoch
             if np.mod(epoch, n_epoch_to_save) == n_epoch_to_save - 1:
                 self.save_checkpoint()
@@ -496,7 +444,7 @@ class DaniNet(object):
         [self.regressors, self.rescales] = pickle.load(file_handler)
 
         self.n_of_regions = np.size(self.rescales)
-        if self.isOnCluster:  # bug loading data file
+        if np.size(np.shape(self.regressors)) == 2:
             tmp = []
             for i in range(self.n_of_regions):
                 tmp.append(self.regressors[i][1])
@@ -701,22 +649,25 @@ class DaniNet(object):
         else:
             return False
 
+    def create_query_labels(self):
+        labels = np.arange(self.numb_of_sample)
+        labels = np.repeat(labels, self.num_progression_points)
+        query_labels = np.ones(
+            shape=(self.numb_of_sample * self.num_progression_points, self.num_progression_points),
+            dtype=np.float32
+        ) * self.image_value_range[0]
+        for i in range(query_labels.shape[0]):
+            query_labels[i, labels[i]] = self.image_value_range[-1]
+        return query_labels
+
     def test(self, images, diagnosis, name):
         test_dir = os.path.join(self.save_dir, self.output_dir)
         if not os.path.exists(test_dir):
             os.makedirs(test_dir)
         curr_image = images[:self.numb_of_sample, :, :, :]
         curr_diagnosis = diagnosis[:self.numb_of_sample, :]
-        size_sample = self.numb_of_sample
-        labels = np.arange(size_sample)
-        labels = np.repeat(labels, self.num_progression_points)
-        query_labels = np.ones(
-            shape=(size_sample * self.num_progression_points, self.num_progression_points),
-            dtype=np.float32
-        ) * self.image_value_range[0]
-        for i in range(query_labels.shape[0]):
-            query_labels[i, labels[i]] = self.image_value_range[-1]
 
+        query_labels = self.create_query_labels()
         query_images = np.tile(curr_image, [self.num_progression_points, 1, 1, 1])
         query_diagnosis = np.tile(curr_diagnosis, [self.num_progression_points, 1])
         z, G = self.session.run(
@@ -732,15 +683,14 @@ class DaniNet(object):
             batch_images=query_images,
             save_path=os.path.join(test_dir, 'input.png'),
             image_value_range=self.image_value_range,
-            size_frame=[self.num_progression_points, size_sample]
+            size_frame=[self.num_progression_points, self.numb_of_sample]
         )
         save_batch_images(
             batch_images=G,
             save_path=os.path.join(test_dir, name),
             image_value_range=self.image_value_range,
-            size_frame=[self.num_progression_points, size_sample]
+            size_frame=[self.num_progression_points, self.numb_of_sample]
         )
-
 
     def normalized_regressors(self, current_region, x):
         return self.rescales[current_region].inverse_transform(self.regressors[current_region].predict_proba(x))
@@ -756,19 +706,18 @@ class DaniNet(object):
         regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
         regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
 
-        # for i in range(0, self.n_regions_can_be_processed):
-        i = 0
-        current_region = select_random_regions[i]
-        featureVector = tf.stack([
-            tf.cast(self.bin_centers_tensor[index1], tf.float32),
-            tf.cast(self.bin_centers_tensor[index2], tf.float32),
-            tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
+        for i in range(0, self.n_regions_can_be_processed):
+            current_region = select_random_regions[i]
+            featureVector = tf.stack([
+                tf.cast(self.bin_centers_tensor[index1], tf.float32),
+                tf.cast(self.bin_centers_tensor[index2], tf.float32),
+                tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
 
-        prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
-        intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
-        region_loss = region_loss + tf.reduce_min(
-            [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
-                      * tf.reduce_sum(self.allMask[:, :, current_region]) / (8 * 8)  # 8*8 is the avarage size of a brain region
+            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
+            intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
+            region_loss = region_loss + tf.reduce_min(
+                [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
+                          * tf.reduce_sum(self.allMask[:, :, current_region]) / (8 * 8)  # 8*8 is the average size of a brain region
         return region_loss
 
     def check_prev_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
@@ -779,7 +728,7 @@ class DaniNet(object):
     cond_2 = lambda self, index1, index2, frames_progression, curr_diagnosis, region_loss: index1 >= 0
 
     def compute_region_regres_loss(self, frames_progression, curr_diagnosis, curr_age):
-        #region loss
+        # region loss
         region_loss = 0.0
         res = tf.while_loop(self.cond_1, self.check_next_longitud_points, [curr_age, curr_age + 1, frames_progression, curr_diagnosis, region_loss])
         res = tf.while_loop(self.cond_2, self.check_prev_longitud_points, [curr_age - 1, curr_age, frames_progression, curr_diagnosis, res[4]])
@@ -809,16 +758,7 @@ class DaniNet(object):
         return pixel_reg_loss / 2
 
     def longitudinal_constrains(self, images, diagnosis, age_index, fuzzy_membership):
-        size_sample = self.numb_of_sample
-        labels = np.arange(size_sample)
-        labels = np.repeat(labels, self.num_progression_points)
-        query_labels = np.ones(
-            shape=(size_sample * self.num_progression_points, self.num_progression_points),
-            dtype=np.float32
-        ) * self.image_value_range[0]
-        for i in range(query_labels.shape[0]):
-            query_labels[i, labels[i]] = self.image_value_range[-1]
-
+        query_labels=self.create_query_labels()
         data_query_labels = tf.convert_to_tensor(query_labels, np.float32)
         x = tf.constant([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
 
@@ -839,7 +779,7 @@ class DaniNet(object):
 
         self.D_img_loss_G = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.zeros_like(discriminator_result_on_sym))
-        )
+        ) / self.num_progression_points  # D_img_loss_G is num_progression_points times simpler since is applied to progression of the same input
         self.G_img_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.ones_like(discriminator_result_on_sym))
         )
