@@ -3,7 +3,7 @@ import numpy as np
 import pickle
 from sklearn.pipeline import make_pipeline
 import sklearn.preprocessing as preprocessing
-from sklearn.svm import SVR
+#from sklearn.svm import SVR
 from sklearn.linear_model import LogisticRegression
 
 
@@ -22,6 +22,7 @@ class progression_net(object):
         filehandler = open('Regressor/' + str(self.current_slice), 'rb')
         [allRegressor, allScaler] = pickle.load(filehandler)
         filehandler.close()
+
         indexForCurrentRegion = (self.in_data[:, 3] == i + 1)
         X = np.float64(self.in_data[indexForCurrentRegion, :3])
         for j in range(np.size(X, 0)):
