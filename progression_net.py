@@ -3,21 +3,20 @@ import numpy as np
 import pickle
 from sklearn.pipeline import make_pipeline
 import sklearn.preprocessing as preprocessing
-
+from sklearn.svm import SVR
 from sklearn.linear_model import LogisticRegression
 
 
 class progression_net(object):
-    def __init__(self, current_slice):
+    def __init__(self, current_slice, max_regional_expansion, map_disease):
         self.num_output = 1
         self.num_inputs = 4
         self.current_slice = current_slice
         self.in_data = []
         self.out_data = []
         self.load_matlab_data(current_slice)
-        self.max_regional_expansion = 10  # same in the class DaniNet
-        self.map_disease = (0, 1, 2, 2, 2, 3)  # same in the class DaniNet
-
+        self.max_regional_expansion = max_regional_expansion
+        self.map_disease = map_disease
 
     def test(self, i):
         filehandler = open('Regressor/' + str(self.current_slice), 'rb')
@@ -26,7 +25,7 @@ class progression_net(object):
         indexForCurrentRegion = (self.in_data[:, 3] == i + 1)
         X = np.float64(self.in_data[indexForCurrentRegion, :3])
         for j in range(np.size(X, 0)):
-            X[j, 2] = self.map_disease[np.int(X[j, 2]) - 1] +1
+            X[j, 2] = self.map_disease[np.int(X[j, 2]) - 1] + 1
         Y = self.out_data[indexForCurrentRegion, :3]
         result = allRegressor[i].predict_proba(X)
         prediction = np.reshape(result[:, 0], [-1, 1])
@@ -48,6 +47,8 @@ class progression_net(object):
 
         y = y[np.reshape(corectIndex, (-1))]
         X = X[np.reshape(corectIndex, (-1)), :]
+        # clf = SVR(C=100, coef0=0.0, degree=2, epsilon=0.005, gamma='auto',
+        #          kernel='linear', max_iter=-1, shrinking=True, tol=0.000001, verbose=True)
 
         clf = LogisticRegression(max_iter=100000000, tol=0.000001,
                                  C=1.0, class_weight='balanced', fit_intercept=True,
