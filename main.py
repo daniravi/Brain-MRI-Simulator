@@ -10,6 +10,7 @@ from matplotlib.pyplot import imread
 import nibabel as nib
 from scipy.misc import imread
 import os
+from GUI import GUI
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -25,7 +26,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--phase', type=int, default=1)
-parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
+parser.add_argument('--epoch', type=int, default=1000, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='training dataset name that stored in ./data')
 parser.add_argument('--savedir', type=str, default='save', help='dir of saving checkpoints and intermediate training results')
@@ -53,29 +54,36 @@ def train_regressors():
                 model = progression_net(j)
                 if model.train_and_save(i):
                     print(i)
-                    #model.test(i)
+                    # model.test(i)
                 else:
                     break
 
 
 def main(_):
+
     conditioned_enabled = True
     progression_enabled = True
     outputFolder = 'test_PR_CD_TF'
+    max_regional_expansion = 10
+    # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
+    #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
+    map_disease = (0, 1, 2, 2, 2, 3)
     if FLAGS.phase == 0:
         exit()
-        # train_regressors()
+        # train_regressors(max_regional_expansion,map_disease)
     if FLAGS.phase == 1:
-        training(FLAGS.slice, conditioned_enabled, progression_enabled)
+        training(FLAGS.slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease)
     if FLAGS.phase == 2:
-        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000)
+        transfer_learning(FLAGS.slice, conditioned_enabled, progression_enabled, 'sample_TF', 1000, max_regional_expansion, map_disease)
     if FLAGS.phase == 3:
-        testing(FLAGS.slice, conditioned_enabled, outputFolder)
+        testing(FLAGS.slice, conditioned_enabled, outputFolder, max_regional_expansion, map_disease)
     if FLAGS.phase == 4:
         assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', outputFolder)
+    if FLAGS.phase == 5:
+        g = GUI()
 
 
-def testing(curr_slice, conditioned_enabled, output_dir):
+def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -87,7 +95,10 @@ def testing(curr_slice, conditioned_enabled, output_dir):
             save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
             dataset_name=FLAGS.datasetTL,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
-            output_dir=output_dir
+            output_dir=output_dir,
+            max_regional_expansion=max_regional_expansion,
+            map_disease=map_disease
+
         )
         print('\n\tTesting Mode')
         model.testing(
@@ -98,7 +109,7 @@ def testing(curr_slice, conditioned_enabled, output_dir):
     tf.reset_default_graph()
 
 
-def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs):
+def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs, max_regional_expansion, map_disease):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -110,7 +121,9 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, outp
             save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
             dataset_name=FLAGS.datasetTL,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
-            output_dir=output_dir
+            output_dir=output_dir,
+            max_regional_expansion=max_regional_expansion,
+            map_disease=map_disease
         )
         print('\n\tTransfer learning mode')
         model.train(
@@ -145,7 +158,7 @@ def assemblyMri(fileName, folder):
         nib.save(img, 'out.nii.gz')
 
 
-def training(curr_slice, conditioned_enabled, progression_enabled):
+def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -157,7 +170,9 @@ def training(curr_slice, conditioned_enabled, progression_enabled):
             is_training=True,  # flag for training or testing mode
             save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
             dataset_name=FLAGS.dataset,  # name of the dataset in the folder ./data
-            slice_number=curr_slice
+            slice_number=curr_slice,
+            max_regional_expansion=max_regional_expansion,
+            map_disease=map_disease
         )
 
         print('\n\tTraining Mode')
