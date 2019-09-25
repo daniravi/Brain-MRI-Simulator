@@ -49,6 +49,7 @@ class DaniNet(object):
         self.tile_ratio = tile_ratio
         self.is_training = is_training
         self.slice_number = slice_number
+        self.age_intervals = age_intervals
         self.map_disease = map_disease
         self.max_regional_expansion = max_regional_expansion  # max rate of regional expansion
         self.save_dir = save_dir + '/' + str(slice_number)
@@ -73,11 +74,10 @@ class DaniNet(object):
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
         # ****************************************** Framework Parameters ***************************************************
-        self.age_intervals = age_intervals
         self.bin_variance_scale = 0.2
-        self.minimum_input_similarity = 0.0000000
+        self.minimum_input_similarity = 0.0000000001
         self.n_regions_can_be_processed = 5  # max number of random region that can be processed at each iteration
-        self.loss_weight = (1, 0.000001, 0.0004, 0.2, 0.2)
+        self.loss_weight = (4, 0.00001, 0.0003, 0.05, 0.02)
         # 0)similarity with the image
         # 1)realistic image (smaller is more realistic)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different),
@@ -289,7 +289,6 @@ class DaniNet(object):
             )
 
         # *********************************** tensorboard *************************************************************
-        # for visualization (TensorBoard): $ tensorboard --logdir path/to/log-directory
         self.EG_learning_rate_summary = tf.summary.scalar('EG_learning_rate', EG_learning_rate)
         self.summary = tf.summary.merge([self.pixel_regres_summary, self.region_regres_summary, self.deformation_summary,
                                          self.D_img_loss_input_summary, self.D_img_loss_G_summary,
