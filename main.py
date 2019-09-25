@@ -14,6 +14,7 @@ from GUI import GUI
 import skfuzzy
 import fnmatch
 from skimage import measure
+from matplotlib import pyplot
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -28,10 +29,11 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--phase', type=int, default=1)
+parser.add_argument('--phase', type=int, default=6)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
-parser.add_argument('--datasetTL', type=str, default='TransferLr', help='training dataset name that stored in ./data')
+parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
+parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testing dataset name that stored in ./data')
 parser.add_argument('--savedir', type=str, default='save', help='dir of saving checkpoints and intermediate training results')
 parser.add_argument('--use_trained_model', type=str2bool, default=True, help='whether train from an existing model or from scratch')
 parser.add_argument('--use_init_model', type=str2bool, default=True, help='whether train from the init model if cannot find an existing model')
@@ -88,6 +90,10 @@ def main(_):
         assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
     if FLAGS.phase == 5:
         GUI()
+    if FLAGS.phase == 6:
+        validation_folder = os.path.join('./data', FLAGS.datasetGT)
+        TL_folder = os.path.join('./data', FLAGS.datasetTL)
+        validation(validation_folder, TL_folder, FLAGS.slice, test_label, age_intervals)
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals):
@@ -160,11 +166,11 @@ def generate_MRI_slice(generated_images, age_to_generate, age_intervals):
 
 def generate_MRI_slice_average_5(curr_slice, folder, fileName):
     a = np.ones((5, 128 * 10, 128 * 10), dtype=np.float)
-    a[0, :, :] = imread('./save/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
-    a[1, :, :] = imread('./save/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
-    a[2, :, :] = imread('./save/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
-    a[3, :, :] = imread('./save/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
-    a[4, :, :] = imread('./save/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
+    a[0, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
+    a[1, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
+    a[2, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+    a[3, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
+    a[4, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
     return a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
 
 
@@ -187,17 +193,27 @@ def hist_norm(source, template):
     return interp_t_values[bin_idx].reshape(old_shape)
 
 
-def validation(validation_folder, TL_folder, curr_slice, output_dir):
+def validation(validation_folder, TL_folder, curr_slice, output_dir, age_intervals):
     all_GT = os.listdir(validation_folder + '/' + str(curr_slice) + '/')
     final_similarity = 0
     for currentGT in all_GT:
+
         current_patient_id = currentGT.split('ADNI_')[1][:10]
         currentGT_image = imread(validation_folder + '/' + str(curr_slice) + '/' + currentGT)
-        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), str('*' + current_patient_id + '*'))
+        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), '*' + current_patient_id + '*')
         first_scan_name = first_scan_name[0]
+        input_image = imread(TL_folder + '/' + str(curr_slice) + '/' + first_scan_name)
         generate_pred_scan = generate_MRI_slice_average_5(curr_slice, output_dir, first_scan_name)
-        generate_pred_scan = hist_norm(generate_pred_scan, first_scan_name)
+        generate_pred_scan = generate_MRI_slice(generate_pred_scan, np.float32(currentGT.split('_')[0]), age_intervals)
+        generate_pred_scan = hist_norm(generate_pred_scan, input_image)
+        #pyplot.imshow(generate_pred_scan)
+        #pyplot.show()
+        #pyplot.imshow(currentGT_image)
+        #pyplot.show()
+        #pyplot.imshow(input_image)
+        #pyplot.show()
         final_similarity = [final_similarity, measure.compare_ssim(generate_pred_scan, currentGT_image)]
+    return final_similarity
 
 
 def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
