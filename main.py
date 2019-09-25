@@ -11,6 +11,9 @@ import nibabel as nib
 from scipy.misc import imread
 import os
 from GUI import GUI
+import skfuzzy
+import fnmatch
+from skimage import measure
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 
@@ -62,9 +65,9 @@ def train_regressors(max_regional_expansion, map_disease, classifier):
 def main(_):
     conditioned_enabled = True
     progression_enabled = True
-    outputFolder = 'test_PR_CD_TF'
+    test_label = 'test'
     max_regional_expansion = 10
-    classifier = 0  # classifier 0 svr, 1 logistic regressor
+    classifier = 1  # classifier 0 svr, 1 logistic regressor
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     map_disease = (0, 1, 2, 2, 2, 3)
@@ -79,10 +82,10 @@ def main(_):
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled, output_dir='sample_TF',
                           num_epochs=1000, max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 3:
-        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=outputFolder, max_regional_expansion=max_regional_expansion,
+        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=test_label, max_regional_expansion=max_regional_expansion,
                 map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 4:
-        assemblyMri('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', outputFolder)
+        assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
     if FLAGS.phase == 5:
         GUI()
 
@@ -143,25 +146,72 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, outp
     tf.reset_default_graph()
 
 
-def assemblyMri(fileName, folder):
-    currSliceSlice = 103
+def generate_MRI_slice(generated_images, age_to_generate, age_intervals):
+    bin_centers = np.convolve(age_intervals, [0.5, 0.5], 'valid')
+    generated_image = np.zeros([128, 128])
+    batch_fuzzy_membership = np.zeros(10)
+    for t in range(10):
+        batch_fuzzy_membership[t] = skfuzzy.membership.gaussmf(age_to_generate, bin_centers[t], 1.5)
+        generated_image = generated_image + generated_images[:128, (t * 128):((t + 1) * 128)] * batch_fuzzy_membership[t]
+
+    generated_image = (generated_image - np.min(generated_image)) / (np.max(generated_image) - np.min(generated_image))
+    return generated_image
+
+
+def generate_MRI_slice_average_5(curr_slice, folder, fileName):
+    a = np.ones((5, 128 * 10, 128 * 10), dtype=np.float)
+    a[0, :, :] = imread('./save/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
+    a[1, :, :] = imread('./save/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
+    a[2, :, :] = imread('./save/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+    a[3, :, :] = imread('./save/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
+    a[4, :, :] = imread('./save/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
+    return a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
+
+
+def hist_norm(source, template):
+    old_type = source.dtype
+    old_shape = source.shape
+    source = source.ravel()
+    template = template.ravel()
+
+    s_values, bin_idx, s_counts = np.unique(source, return_inverse=True,
+                                            return_counts=True)
+    t_values, t_counts = np.unique(template, return_counts=True)
+    s_quantiles = np.cumsum(s_counts).astype(np.float64)
+    s_quantiles /= s_quantiles[-1]
+    t_quantiles = np.cumsum(t_counts).astype(np.float64)
+    t_quantiles /= t_quantiles[-1]
+    interp_t_values = np.interp(s_quantiles, t_quantiles, t_values)
+    interp_t_values = interp_t_values.astype(old_type)
+
+    return interp_t_values[bin_idx].reshape(old_shape)
+
+
+def validation(validation_folder, TL_folder, curr_slice, output_dir):
+    all_GT = os.listdir(validation_folder + '/' + str(curr_slice) + '/')
+    final_similarity = 0
+    for currentGT in all_GT:
+        current_patient_id = currentGT.split('ADNI_')[1][:10]
+        currentGT_image = imread(validation_folder + '/' + str(curr_slice) + '/' + currentGT)
+        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), str('*' + current_patient_id + '*'))
+        first_scan_name = first_scan_name[0]
+        generate_pred_scan = generate_MRI_slice_average_5(curr_slice, output_dir, first_scan_name)
+        generate_pred_scan = hist_norm(generate_pred_scan, first_scan_name)
+        final_similarity = [final_similarity, measure.compare_ssim(generate_pred_scan, currentGT_image)]
+
+
+def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
+    curr_slice = 103
     numb_Slice = 30
-    a = np.ones((5, 1280, 1280), dtype=np.float)
-    finalMri = np.ones((numb_Slice, 128, 128), dtype=np.int16)
+
+    final_MRI = np.ones((numb_Slice, 128, 128), dtype=np.int16)
     for i in range(0, numb_Slice):
-        a[0, :, :] = imread('./save/' + str(currSliceSlice - 2) + '/' + folder + '/test_2_' + fileName)
-        a[1, :, :] = imread('./save/' + str(currSliceSlice - 1) + '/' + folder + '/test_1_' + fileName)
-        a[2, :, :] = imread('./save/' + str(currSliceSlice) + '/' + folder + '/test_0_' + fileName)
-        a[3, :, :] = imread('./save/' + str(currSliceSlice + 1) + '/' + folder + '/test_-1_' + fileName)
-        a[4, :, :] = imread('./save/' + str(currSliceSlice + 2) + '/' + folder + '/test_-2_' + fileName)
-        MRIAll = a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
+        progression_MRI = generate_MRI_slice_average_5(curr_slice, folder, fileName)
+        final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
 
-        index_progression = 9
-        finalMri[i, :, :] = np.int16(MRIAll[:128, 128 * index_progression:128 * (index_progression + 1)])
-
-        currSliceSlice = currSliceSlice + 1
-        img = nib.Nifti1Image(finalMri, np.eye(4))
-        nib.save(img, 'out.nii.gz')
+        curr_slice = curr_slice + 1
+        img = nib.Nifti1Image(final_MRI, np.eye(4))
+        nib.save(img, str(age_to_generate) + 'out.nii.gz')
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease, age_intervals):
