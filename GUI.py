@@ -43,10 +43,10 @@ class GUI(object):
         plt.text(-100, -5, "g(i)", fontsize=14)
         plt.text(50, -5, "g(i)-x", fontsize=14)
 
-        ax_position = plt.axes(rect=[0.1, 0.9, 0.1, 0.05])
+        ax_position = plt.axes([0.1, 0.9, 0.1, 0.05])
         self.button = Button(ax_position, 'Load', color='lightgoldenrodyellow', hovercolor='0.975')
 
-        ax_position = plt.axes(rect=[0.45, 0.12, 0.1, 0.05])
+        ax_position = plt.axes([0.45, 0.12, 0.1, 0.05])
         self.buttonAnimate = Button(ax_position, 'Simulation', color='lightgoldenrodyellow', hovercolor='0.975')
         self.ageIncrement = 0.5
         self.button.on_clicked(self.reset)
@@ -106,21 +106,8 @@ class GUI(object):
             batch_fuzzy_membership[t] = skfuzzy.membership.gaussmf(self.current_age_to_show, self.bin_centers[t], 1.5)
             generated_image = generated_image + self.generated_images[:128, (t * 128):((t + 1) * 128)] * batch_fuzzy_membership[t]
 
-        all_image_min = np.ones([128, 128])
-        all_image_max = np.zeros([128, 128])
-        currentBin = np.min([np.max([np.digitize(self.real_age, self.bin_centers) - 1, 0]), 9])
-
-        for i in range(self.bin_of_input + 1, currentBin):
-            all_image_min = np.minimum(all_image_min, self.generated_images[:128, (i * 128):((i + 1) * 128)])
-
-        for i in range(currentBin, self.bin_of_input):
-            all_image_max = np.maximum(all_image_max, self.generated_images[:128, (i * 128):((i + 1) * 128)])
-
         generated_image = (generated_image - np.min(generated_image)) / (np.max(generated_image) - np.min(generated_image))
-        generated_image = np.minimum(generated_image, all_image_min)
-        generated_image = np.maximum(generated_image, all_image_max)
         generated_image = np.rot90(generated_image, 1)
-
         self.imGUI_Out.set_data(generated_image)
 
         diff = abs(self.currentImageIn - generated_image)
