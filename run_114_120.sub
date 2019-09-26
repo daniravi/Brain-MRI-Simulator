@@ -3,7 +3,7 @@
 #$ -l tmem=16G
 #$ -l gpu=1
 #$ -l gpu_titanxp=1
-#$ -l h_rt=200:00:00
+#$ -l h_rt=10:00:00
 #$ -wd /home/daniravi/dani_net
 
 hostname
