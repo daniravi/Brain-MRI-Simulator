@@ -1,6 +1,7 @@
 import tensorflow as tf
 from DaniNet import DaniNet
 from os import environ
+import os
 import argparse
 from progression_net import progression_net
 import pickle
@@ -9,14 +10,16 @@ import numpy as np
 from matplotlib.pyplot import imread
 import nibabel as nib
 from scipy.misc import imread
-import os
 from GUI import GUI
 import skfuzzy
 import fnmatch
-from skimage import measure
-from matplotlib import pyplot
+from datetime import datetime
+import re
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+environ['PATH']=environ['PATH']+':/usr/local/fsl/bin'
+environ['FSLDIR']='/usr/local/fsl'
+environ['FSLOUTPUTTYPE']='NIFTI'
 
 
 def str2bool(v):
@@ -29,7 +32,7 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--phase', type=int, default=6)
+parser.add_argument('--phase', type=int, default=1)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -91,9 +94,10 @@ def main(_):
     if FLAGS.phase == 5:
         GUI()
     if FLAGS.phase == 6:
-        validation_folder = os.path.join('./data', FLAGS.datasetGT)
-        TL_folder = os.path.join('./data', FLAGS.datasetTL)
-        validation(validation_folder, TL_folder, FLAGS.slice, test_label, age_intervals)
+        # validation_folder = os.path.join('./data', FLAGS.datasetGT)
+        # TL_folder = os.path.join('./data', FLAGS.datasetTL)
+        # validation(validation_folder, TL_folder, FLAGS.slice, test_label, age_intervals)
+        extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii')
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals):
@@ -194,26 +198,59 @@ def hist_norm(source, template):
 
 
 def validation(validation_folder, TL_folder, curr_slice, output_dir, age_intervals):
+    from skimage import measure
+    from matplotlib import pyplot
+
     all_GT = os.listdir(validation_folder + '/' + str(curr_slice) + '/')
     final_similarity = 0
     for currentGT in all_GT:
-
         current_patient_id = currentGT.split('ADNI_')[1][:10]
         currentGT_image = imread(validation_folder + '/' + str(curr_slice) + '/' + currentGT)
-        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), '*' + current_patient_id + '*')
+        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), '*' + str(current_patient_id) + '*')
         first_scan_name = first_scan_name[0]
         input_image = imread(TL_folder + '/' + str(curr_slice) + '/' + first_scan_name)
         generate_pred_scan = generate_MRI_slice_average_5(curr_slice, output_dir, first_scan_name)
         generate_pred_scan = generate_MRI_slice(generate_pred_scan, np.float32(currentGT.split('_')[0]), age_intervals)
         generate_pred_scan = hist_norm(generate_pred_scan, input_image)
-        #pyplot.imshow(generate_pred_scan)
-        #pyplot.show()
-        #pyplot.imshow(currentGT_image)
-        #pyplot.show()
-        #pyplot.imshow(input_image)
-        #pyplot.show()
+        show_results = 0
+        if show_results:
+            pyplot.imshow(generate_pred_scan)
+            pyplot.show()
+            pyplot.imshow(currentGT_image)
+            pyplot.show()
+            pyplot.imshow(input_image)
+            pyplot.show()
         final_similarity = [final_similarity, measure.compare_ssim(generate_pred_scan, currentGT_image)]
     return final_similarity
+
+
+def extract_volumes(input_file):
+    start_time = datetime.now()
+    os.system('mkdir FSL_file')
+    os.system('cp ' + input_file + ' ./FSL_file/input.nii')
+    Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
+    #os.system('run_first_all -i ./FSL_file/input.nii -b -s L_Hipp,R_Hipp -o ./FSL_file/regions')
+    time_elapsed = datetime.now() - start_time
+    print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+
+    start_time = datetime.now()
+    os.system('fslstats ./FSL_file/regions_all_fast_firstseg.nii -h 64 > ./FSL_file/region_volume.txt')
+    text_file = open("./FSL_file/region_volume.txt", "r")
+    lines = text_file.readlines()
+    text_file.close()
+    Vol=[]
+    for i in [20,63]:
+        Vol=np.append(Vol,np.float32(lines[i]))
+    #os.system('sienax ./FSL_file/input.nii -o ./FSL_file/tissue -r')
+    time_elapsed = datetime.now() - start_time
+    print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+
+    text_file = open("./FSL_file/tissue/report.sienax", "r")
+    lines = text_file.readlines()
+    text_file.close()
+    for i in range(np.size(lines)-5,np.size(lines)):
+        Vol=np.append(Vol,re.findall('\d+\.\d+', lines[i])[0])
+    print(Vol)
 
 
 def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
