@@ -75,11 +75,11 @@ class DaniNet(object):
 
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2
-        self.minimum_input_similarity = 0.0000000001
-        self.n_regions_can_be_processed = 5  # max number of random region that can be processed at each iteration
-        self.loss_weight = (4, 0.00001, 0.0003, 0.05, 0.02)
-        # 0)similarity with the image
-        # 1)realistic image (smaller is more realistic)
+        self.minimum_input_similarity = 0.00000000001
+        self.n_regions_can_be_processed = 1  # max number of random region that can be processed at each iteration
+        self.loss_weight = (100, 0.0001, 0.0004, 2, 1)
+        # 0)similarity with the image # the sum need to be equal to 1
+        # 1)realistic image (smaller is more realistic structures)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different),
         # 3)pixel loss
         # 4)regional loss
@@ -219,6 +219,7 @@ class DaniNet(object):
         self.G_img_loss_summary = tf.summary.scalar('G_img_loss', self.G_img_loss)
         self.D_G_logits_summary = tf.summary.histogram('D_G_logits', self.D_G_logits)
         self.D_input_logits_summary = tf.summary.histogram('D_input_logits', self.D_input_logits)
+        self.E_z_loss_summary = tf.summary.scalar('E_z_loss', self.E_z_loss)
         self.saver = tf.train.Saver(max_to_keep=2)
 
     def train(self,
@@ -293,7 +294,7 @@ class DaniNet(object):
         self.summary = tf.summary.merge([self.pixel_regres_summary, self.region_regres_summary, self.deformation_summary,
                                          self.D_img_loss_input_summary, self.D_img_loss_G_summary,
                                          self.G_img_loss_summary, self.EG_learning_rate_summary,
-                                         self.D_G_logits_summary, self.D_input_logits_summary
+                                         self.D_G_logits_summary, self.D_input_logits_summary, self.E_z_loss_summary
                                          ])
 
         self.writer = tf.summary.FileWriter(os.path.join(self.save_dir, 'summary'), self.session.graph)
