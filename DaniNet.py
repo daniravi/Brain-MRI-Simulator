@@ -74,15 +74,20 @@ class DaniNet(object):
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
         # ****************************************** Framework Parameters ***************************************************
-        self.bin_variance_scale = 0.2
-        self.minimum_input_similarity = 0.00000000001
+        self.bin_variance_scale = 0.2 #this is connected with the first parameter of loss_weight
+        self.minimum_input_similarity = 0.3 #this is connected with the first parameter of loss_weight
         self.n_regions_can_be_processed = 1  # max number of random region that can be processed at each iteration
-        self.loss_weight = (100, 0.0001, 0.0004, 2, 1)
-        # 0)similarity with the image # the sum need to be equal to 1
-        # 1)realistic image (smaller is more realistic structures)
-        # 2)smoothing in progression (0 very smooth , 1 major freedom to be different),
-        # 3)pixel loss
-        # 4)regional loss
+        self.loss_weight = (0.5, 0.5, 0.5, 0.15, 0.15)
+        # 0)similarity with the image # the sum need to be equal to 1 (population avarage vs personality)
+        # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
+        # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smooting vs progression)
+        # 3)pixel loss  (progression)
+        # 4)regional loss (progression-> reliability of progression prior)
+
+        self.loss_weight_scale= (10**2, 10**-5, 10**-2, 10, 10)
+        self.minimum_input_similarity_scale=10**-13
+        self.loss_weight = np.multiply(self.loss_weight,self.loss_weight_scale)
+        self.minimum_input_similarity=self.minimum_input_similarity*self.minimum_input_similarity_scale
 
         # *********************************************************************************************
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
