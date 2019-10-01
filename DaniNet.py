@@ -79,9 +79,9 @@ class DaniNet(object):
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
         self.loss_weight = (0.5, 0.2, 0.5, 0.5, 0.5)
         self.speed_increasing_progression_weight = 0.5
-        # 0)similarity with the image # the sum need to be equal to 1 (population avarage vs personality)
+        # 0)similarity with the image # the sum need to be equal to 1 (population average vs personality)
         # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
-        # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smooting vs progression)
+        # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smoothing vs progression)
         # 3)pixel loss  (progression)
         # 4)regional loss (progression-> reliability of progression prior)
 

@@ -228,8 +228,8 @@ def extract_volumes(input_file):
     start_time = datetime.now()
     os.system('mkdir FSL_file')
     os.system('cp ' + input_file + ' ./FSL_file/input.nii')
-    Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
-    #os.system('run_first_all -i ./FSL_file/input.nii -b -s L_Hipp,R_Hipp -o ./FSL_file/regions')
+    #Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
+    os.system('run_first_all -i ./FSL_file/input.nii -b -s L_Hipp,R_Hipp -o ./FSL_file/regions')
     time_elapsed = datetime.now() - start_time
     print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
 
@@ -241,7 +241,7 @@ def extract_volumes(input_file):
     Vol=[]
     for i in [20,63]:
         Vol=np.append(Vol,np.float32(lines[i]))
-    #os.system('sienax ./FSL_file/input.nii -o ./FSL_file/tissue -r')
+    os.system('sienax ./FSL_file/input.nii -o ./FSL_file/tissue -r')
     time_elapsed = datetime.now() - start_time
     print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
 
