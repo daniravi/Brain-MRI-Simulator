@@ -70,24 +70,23 @@ class DaniNet(object):
         self.D_img_loss_G = 0
         self.G_img_loss = 0
         self.n_of_regions = 0
+        self.initial_global_step = 0
+        self.minimum_input_similarity = 0
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
         # ****************************************** Framework Parameters ***************************************************
-        self.bin_variance_scale = 0.2 #this is connected with the first parameter of loss_weight
-        self.minimum_input_similarity = 0.3 #this is connected with the first parameter of loss_weight
-        self.n_regions_can_be_processed = 1  # max number of random region that can be processed at each iteration
-        self.loss_weight = (0.5, 0.5, 0.5, 0.15, 0.15)
+        self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
+        self.loss_weight = (0.5, 0.2, 0.5, 0.5, 0.5)
         # 0)similarity with the image # the sum need to be equal to 1 (population avarage vs personality)
         # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smooting vs progression)
         # 3)pixel loss  (progression)
         # 4)regional loss (progression-> reliability of progression prior)
 
-        self.loss_weight_scale= (10**2, 10**-5, 10**-2, 10, 10)
-        self.minimum_input_similarity_scale=10**-13
-        self.loss_weight = np.multiply(self.loss_weight,self.loss_weight_scale)
-        self.minimum_input_similarity=self.minimum_input_similarity*self.minimum_input_similarity_scale
+        self.loss_weight_scale = (10 ** 2, 10 ** -2, 10 ** -2, 1, 10 ** -1)
+        self.loss_weight = np.multiply(self.loss_weight, self.loss_weight_scale)
+
 
         # *********************************************************************************************
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
@@ -239,7 +238,7 @@ class DaniNet(object):
               conditioned_enabled=True,
               progression_enabled=True
               ):
-        weights = self.loss_weight
+        weights = self.loss_weight.copy()
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
@@ -304,7 +303,6 @@ class DaniNet(object):
 
         self.writer = tf.summary.FileWriter(os.path.join(self.save_dir, 'summary'), self.session.graph)
 
-
         # ******************************************* training *******************************************************
         # initialize the graph
         tf.global_variables_initializer().run()
@@ -337,6 +335,22 @@ class DaniNet(object):
             if enable_shuffle:
                 np.random.shuffle(file_names)
             start_time = time.time()
+            curr_epoch = epoch + self.initial_global_step / num_batches
+            self.minimum_input_similarity = 1 / np.power((curr_epoch * num_batches + 1), 4)
+            weights[3] = self.loss_weight[3] * (np.power(curr_epoch, 0.2))
+            weights[4] = self.loss_weight[4] * (np.power(curr_epoch, 0.5))
+
+            print('W3:' + str(weights[3]))
+            print('w4:' + str(weights[4]))
+
+            if progression_enabled:
+                self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                               self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
+                               self.deformation_loss * weights[0]
+            else:
+                self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                               self.deformation_loss * weights[0]
+
             for ind_batch in range(num_batches):
                 # read batch images and labels
                 batch_files = file_names[ind_batch * self.size_batch:(ind_batch + 1) * self.size_batch]
@@ -398,7 +412,7 @@ class DaniNet(object):
                     [self.size_batch, self.num_z_channels]
                 ).astype(np.float32)
 
-                _, _, _, = self.session.run(
+                _, _, _ = self.session.run(
                     fetches=[
                         self.EG_optimizer,
                         self.D_z_optimizer,
@@ -424,7 +438,7 @@ class DaniNet(object):
                     self.z_prior: batch_z_prior
                 }
             )
-            self.writer.add_summary(summary, self.EG_global_step.eval())
+            self.writer.add_summary(summary, self.EG_global_step.eval() + self.initial_global_step)
             print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
             elapse = time.time() - start_time
             print(time.strftime("Time: %H:%M:%S", time.gmtime(elapse)))
@@ -632,7 +646,7 @@ class DaniNet(object):
         self.saver.save(
             sess=self.session,
             save_path=os.path.join(checkpoint_dir, 'model'),
-            global_step=self.EG_global_step.eval()
+            global_step=self.EG_global_step.eval() + self.initial_global_step
         )
 
     def load_checkpoint(self, model_path=None):
@@ -647,6 +661,8 @@ class DaniNet(object):
             checkpoints_name = os.path.basename(checkpoints.model_checkpoint_path)
             try:
                 self.saver.restore(self.session, os.path.join(checkpoint_dir, checkpoints_name))
+                if os.path.basename(checkpoints_name).split('-')[1].isdigit():
+                    self.initial_global_step = np.int(os.path.basename(checkpoints_name).split('-')[1])
                 return True
             except Exception as e:
                 print(str(e))
@@ -711,18 +727,19 @@ class DaniNet(object):
         regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
         regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
 
-        for i in range(0, self.n_regions_can_be_processed):
-            current_region = select_random_regions[i]
-            featureVector = tf.stack([
-                tf.cast(self.bin_centers_tensor[index1], tf.float32),
-                tf.cast(self.bin_centers_tensor[index2], tf.float32),
-                tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
+        # for i in range(0, self.n_regions_can_be_processed):
+        i = 0
+        current_region = select_random_regions[i]
+        featureVector = tf.stack([
+            tf.cast(self.bin_centers_tensor[index1], tf.float32),
+            tf.cast(self.bin_centers_tensor[index2], tf.float32),
+            tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
 
-            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
-            intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
-            region_loss = region_loss + tf.reduce_min(
-                [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
-                          * tf.reduce_sum(self.allMask[:, :, current_region]) / (8 * 8)  # 8*8 is the average size of a brain region
+        prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
+        intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
+        region_loss = region_loss + tf.reduce_min(
+            [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
+                      * tf.reduce_sum(self.allMask[:, :, current_region]) / (8 * 8)  # 8*8 is the average size of a brain region
         return region_loss
 
     def check_prev_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
@@ -763,7 +780,7 @@ class DaniNet(object):
         return pixel_reg_loss / 2
 
     def longitudinal_constrains(self, images, diagnosis, age_index, fuzzy_membership):
-        query_labels=self.create_query_labels()
+        query_labels = self.create_query_labels()
         data_query_labels = tf.convert_to_tensor(query_labels, np.float32)
         x = tf.constant([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
 
@@ -788,7 +805,6 @@ class DaniNet(object):
         self.G_img_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.ones_like(discriminator_result_on_sym))
         )
-
         for j in range(0, self.numb_of_sample):
             frames_progression = tf.gather(z, x + j)
             selected_query_images = tf.gather(query_images, j)
@@ -801,7 +817,7 @@ class DaniNet(object):
             loss_regional_regression = loss_regional_regression + self.compute_region_regres_loss(frames_progression, curr_diagnosis_final, curr_age_final)
             loss_deformation = loss_deformation + c2
 
-        return loss_pixel_regression / self.numb_of_sample, loss_regional_regression / (self.n_regions_can_be_processed * self.numb_of_sample), \
+        return loss_pixel_regression / self.numb_of_sample, loss_regional_regression / self.numb_of_sample, \
                loss_deformation / self.numb_of_sample
 
     def testing(self, testing_samples_dir, current_slice, conditioned_enabled):
