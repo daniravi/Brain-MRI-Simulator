@@ -78,6 +78,7 @@ class DaniNet(object):
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
         self.loss_weight = (0.5, 0.2, 0.5, 0.5, 0.5)
+        self.speed_increasing_progression_weight = 0.5
         # 0)similarity with the image # the sum need to be equal to 1 (population avarage vs personality)
         # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smooting vs progression)
@@ -88,7 +89,6 @@ class DaniNet(object):
         self.loss_weight = np.multiply(self.loss_weight, self.loss_weight_scale)
 
 
-        # *********************************************************************************************
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
         self.bin_size = np.diff(self.bin_centers)
         self.bin_size = np.append(self.bin_size, self.bin_size[self.bin_size.size - 1])
@@ -226,6 +226,15 @@ class DaniNet(object):
         self.E_z_loss_summary = tf.summary.scalar('E_z_loss', self.E_z_loss)
         self.saver = tf.train.Saver(max_to_keep=2)
 
+    def define_loss_EF(self, progression_enabled, weights):
+        if progression_enabled:
+            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                           self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
+                           self.deformation_loss * weights[0]
+        else:
+            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
+                           self.deformation_loss * weights[0]
+
     def train(self,
               num_epochs=200,  # number of epochs
               learning_rate=0.0003,  # learning rate of optimizer
@@ -238,20 +247,15 @@ class DaniNet(object):
               conditioned_enabled=True,
               progression_enabled=True
               ):
+
         weights = self.loss_weight.copy()
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
         if enable_shuffle:
             np.random.shuffle(file_names)
-        if progression_enabled:
-            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
-                           self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
-                           self.deformation_loss * weights[0]
-        else:
-            self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
-                           self.deformation_loss * weights[0]
 
+        self.define_loss_EF(progression_enabled, weights)
         self.loss_Dz = self.D_z_loss_prior + self.D_z_loss_z
         self.loss_Di = self.D_img_loss_input + self.D_img_loss_G
 
@@ -338,18 +342,12 @@ class DaniNet(object):
             curr_epoch = epoch + self.initial_global_step / num_batches
             self.minimum_input_similarity = 1 / np.power((curr_epoch * num_batches + 1), 4)
             weights[3] = self.loss_weight[3] * (np.power(curr_epoch, 0.2))
-            weights[4] = self.loss_weight[4] * (np.power(curr_epoch, 0.5))
+            weights[4] = self.loss_weight[4] * (np.power(curr_epoch, self.speed_increasing_progression_weight))
 
             print('W3:' + str(weights[3]))
             print('w4:' + str(weights[4]))
 
-            if progression_enabled:
-                self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
-                               self.pixel_regres_loss * weights[3] + self.region_regres_loss * weights[4] + \
-                               self.deformation_loss * weights[0]
-            else:
-                self.loss_EG = self.G_img_loss * weights[1] + self.E_z_loss * weights[2] + \
-                               self.deformation_loss * weights[0]
+            self.define_loss_EF(progression_enabled, weights)
 
             for ind_batch in range(num_batches):
                 # read batch images and labels
@@ -456,7 +454,7 @@ class DaniNet(object):
 
     def load_extra_data(self):
         mat = h5py.File('Mask/Mask_' + str(self.slice_number) + '.mat', 'r')
-        self.allMask = mat['allMask'][()]  # array
+        self.allMask = mat['allMask'][()]
         self.allMask = self.allMask.T
         self.allMask = tf.convert_to_tensor(self.allMask, np.float32)
         file_handler = open('Regressor/' + str(self.slice_number), 'rb')
@@ -727,9 +725,7 @@ class DaniNet(object):
         regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
         regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
 
-        # for i in range(0, self.n_regions_can_be_processed):
-        i = 0
-        current_region = select_random_regions[i]
+        current_region = select_random_regions[0] #first region extracted randomly
         featureVector = tf.stack([
             tf.cast(self.bin_centers_tensor[index1], tf.float32),
             tf.cast(self.bin_centers_tensor[index2], tf.float32),
@@ -801,7 +797,7 @@ class DaniNet(object):
 
         self.D_img_loss_G = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.zeros_like(discriminator_result_on_sym))
-        ) / self.num_progression_points  # D_img_loss_G is num_progression_points times simpler since is applied to progression of the same input
+        ) / self.num_progression_points  # D_img_loss_G is num_progression_points times easier since is applied to progression images
         self.G_img_loss = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(logits=discriminator_result_on_sym, labels=tf.ones_like(discriminator_result_on_sym))
         )
