@@ -71,23 +71,22 @@ class DaniNet(object):
         self.G_img_loss = 0
         self.n_of_regions = 0
         self.initial_global_step = 0
-        self.minimum_input_similarity = 0
+        self.minimum_input_similarity = 0.3 * 10 ** -13
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
-        self.loss_weight = (0.5, 0.2, 0.5, 0.5, 0.5)
-        self.speed_increasing_progression_weight = 0.5
+        self.loss_weight = (2, 0.1, 0.5, 0.8, 0.4)
+        self.speed_increasing_loss_weight_pow = 0.7
         # 0)similarity with the image # the sum need to be equal to 1 (population average vs personality)
         # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smoothing vs progression)
         # 3)pixel loss  (progression)
         # 4)regional loss (progression-> reliability of progression prior)
 
-        self.loss_weight_scale = (10 ** 2, 10 ** -2, 10 ** -2, 1, 10 ** -1)
+        self.loss_weight_scale = (10 ** 2, 10 ** -1, 1, 1, 1)
         self.loss_weight = np.multiply(self.loss_weight, self.loss_weight_scale)
-
 
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
         self.bin_size = np.diff(self.bin_centers)
@@ -224,7 +223,7 @@ class DaniNet(object):
         self.D_G_logits_summary = tf.summary.histogram('D_G_logits', self.D_G_logits)
         self.D_input_logits_summary = tf.summary.histogram('D_input_logits', self.D_input_logits)
         self.E_z_loss_summary = tf.summary.scalar('E_z_loss', self.E_z_loss)
-        self.saver = tf.train.Saver(max_to_keep=2)
+        self.saver = tf.train.Saver(max_to_keep=1)
 
     def define_loss_EF(self, progression_enabled, weights):
         if progression_enabled:
@@ -243,7 +242,7 @@ class DaniNet(object):
               enable_shuffle=True,  # enable shuffle of the dataset
               use_trained_model=True,  # use the saved checkpoint to initialize the network
               use_init_model=True,  # use the init model to initialize the network
-              n_epoch_to_save=3,
+              n_epoch_to_save=20,
               conditioned_enabled=True,
               progression_enabled=True
               ):
@@ -340,12 +339,7 @@ class DaniNet(object):
                 np.random.shuffle(file_names)
             start_time = time.time()
             curr_epoch = epoch + self.initial_global_step / num_batches
-            self.minimum_input_similarity = 1 / np.power((curr_epoch * num_batches + 1), 4)
-            weights[3] = self.loss_weight[3] * (np.power(curr_epoch, 0.2))
-            weights[4] = self.loss_weight[4] * (np.power(curr_epoch, self.speed_increasing_progression_weight))
-
-            print('W3:' + str(weights[3]))
-            print('w4:' + str(weights[4]))
+            weights[0] = self.loss_weight[0] / np.power((curr_epoch + 1), self.speed_increasing_loss_weight_pow)
 
             self.define_loss_EF(progression_enabled, weights)
 
@@ -725,7 +719,7 @@ class DaniNet(object):
         regional_intensity_sum1 = tf.reduce_sum(self.allMask * image1, [0, 1])
         regional_intensity_sum2 = tf.reduce_sum(self.allMask * image2, [0, 1])
 
-        current_region = select_random_regions[0] #first region extracted randomly
+        current_region = select_random_regions[0]  # first region extracted randomly
         featureVector = tf.stack([
             tf.cast(self.bin_centers_tensor[index1], tf.float32),
             tf.cast(self.bin_centers_tensor[index2], tf.float32),

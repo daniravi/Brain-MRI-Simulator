@@ -17,9 +17,9 @@ from datetime import datetime
 import re
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-environ['PATH']=environ['PATH']+':/usr/local/fsl/bin'
-environ['FSLDIR']='/usr/local/fsl'
-environ['FSLOUTPUTTYPE']='NIFTI'
+environ['PATH'] = environ['PATH'] + ':/usr/local/fsl/bin'
+environ['FSLDIR'] = '/usr/local/fsl'
+environ['FSLOUTPUTTYPE'] = 'NIFTI'
 
 
 def str2bool(v):
@@ -72,6 +72,7 @@ def main(_):
     progression_enabled = True
     test_label = 'test'
     max_regional_expansion = 10
+    num_epochs_transfer_learning = 1000
     classifier = 1  # classifier 0 svr, 1 logistic regressor
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
@@ -85,7 +86,8 @@ def main(_):
                  max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
     if FLAGS.phase == 2:
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled, output_dir='sample_TF',
-                          num_epochs=1000, max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
+                          num_epochs=num_epochs_transfer_learning, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
+                          age_intervals=age_intervals)
     if FLAGS.phase == 3:
         testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=test_label, max_regional_expansion=max_regional_expansion,
                 map_disease=map_disease, age_intervals=age_intervals)
@@ -228,7 +230,7 @@ def extract_volumes(input_file):
     start_time = datetime.now()
     os.system('mkdir FSL_file')
     os.system('cp ' + input_file + ' ./FSL_file/input.nii')
-    #Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
+    # Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
     os.system('run_first_all -i ./FSL_file/input.nii -b -s L_Hipp,R_Hipp -o ./FSL_file/regions')
     time_elapsed = datetime.now() - start_time
     print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
@@ -238,9 +240,9 @@ def extract_volumes(input_file):
     text_file = open("./FSL_file/region_volume.txt", "r")
     lines = text_file.readlines()
     text_file.close()
-    Vol=[]
-    for i in [20,63]:
-        Vol=np.append(Vol,np.float32(lines[i]))
+    Vol = []
+    for i in [20, 63]:
+        Vol = np.append(Vol, np.float32(lines[i]))
     os.system('sienax ./FSL_file/input.nii -o ./FSL_file/tissue -r')
     time_elapsed = datetime.now() - start_time
     print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
@@ -248,8 +250,8 @@ def extract_volumes(input_file):
     text_file = open("./FSL_file/tissue/report.sienax", "r")
     lines = text_file.readlines()
     text_file.close()
-    for i in range(np.size(lines)-5,np.size(lines)):
-        Vol=np.append(Vol,re.findall('\d+\.\d+', lines[i])[0])
+    for i in range(np.size(lines) - 5, np.size(lines)):
+        Vol = np.append(Vol, re.findall('\d+\.\d+', lines[i])[0])
     print(Vol)
 
 
