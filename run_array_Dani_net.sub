@@ -1,12 +1,14 @@
 #$ -S /bin/bash
 #$ -j y
 #$ -l tmem=12G
-#$ -l gpu=1
-#$ -l gpu_titanxp=1
+#$ -l gpu=true
+##$ -l gpu_titanxp=1
+##$ -l gpu_p100=1
 #$ -l h_rt=10:00:00
 #$ -wd /home/daniravi/dani_net
 #$ -t 40-142
-#$ -tc 10
+#$ -tc 50
+#$ -pe gpu 1
 
 
 hostname
