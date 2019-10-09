@@ -33,7 +33,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--phase', type=int, default=1)
-parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
+parser.add_argument('--epoch', type=int, default=400, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
 parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testing dataset name that stored in ./data')
@@ -70,12 +70,20 @@ def train_regressors(max_regional_expansion, map_disease, classifier):
 def main(_):
     conditioned_enabled = True
     progression_enabled = True
+    attention_loss_function = True
+    V2_enabled = True  # fuzzy +  remove voxel loss + logistic regressor
     test_label = 'test'
-    max_regional_expansion = 10
-    num_epochs_transfer_learning = 1000
-    classifier = 1  # classifier 0 svr, 1 logistic regressor
+
+    if V2_enabled:
+        classifier = 1  # 1 logistic regressor
+    else:
+        classifier = 0  # 0 support vector regressor
+
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
+
+    max_regional_expansion = 10
+    num_epochs_transfer_learning = 1000
     map_disease = (0, 1, 2, 2, 2, 3)
     age_intervals = (63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
 
@@ -83,14 +91,15 @@ def main(_):
         train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, classifier=classifier)
     if FLAGS.phase == 1:
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
-                 max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals)
+                 attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
+                 age_intervals=age_intervals, V2_enabled=V2_enabled)
     if FLAGS.phase == 2:
-        transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled, output_dir='sample_TF',
-                          num_epochs=num_epochs_transfer_learning, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
-                          age_intervals=age_intervals)
+        transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
+                          attention_loss_function=attention_loss_function, output_dir='sample_TF', num_epochs=num_epochs_transfer_learning,
+                          max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
     if FLAGS.phase == 3:
         testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=test_label, max_regional_expansion=max_regional_expansion,
-                map_disease=map_disease, age_intervals=age_intervals)
+                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
     if FLAGS.phase == 4:
         assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
     if FLAGS.phase == 5:
@@ -102,7 +111,7 @@ def main(_):
         extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii')
 
 
-def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals):
+def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -117,7 +126,8 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
             output_dir=output_dir,
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
-            age_intervals=age_intervals
+            age_intervals=age_intervals,
+            V2_enabled=V2_enabled
 
         )
         print('\n\tTesting Mode')
@@ -129,7 +139,8 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
     tf.reset_default_graph()
 
 
-def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, output_dir, num_epochs, max_regional_expansion, map_disease, age_intervals):
+def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, output_dir, num_epochs, max_regional_expansion,
+                      map_disease, age_intervals, V2_enabled):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -144,7 +155,8 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, outp
             output_dir=output_dir,
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
-            age_intervals=age_intervals
+            age_intervals=age_intervals,
+            V2_enabled=V2_enabled
         )
         print('\n\tTransfer learning mode')
         model.train(
@@ -153,7 +165,8 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, outp
             use_init_model=FLAGS.use_init_model,
             n_epoch_to_save=num_epochs,
             conditioned_enabled=conditioned_enabled,
-            progression_enabled=progression_enabled
+            progression_enabled=progression_enabled,
+            attention_loss_function=attention_loss_function
         )
     tf.reset_default_graph()
 
@@ -269,7 +282,7 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
         nib.save(img, str(age_to_generate) + 'out.nii.gz')
 
 
-def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_expansion, map_disease, age_intervals):
+def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -284,7 +297,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_
             slice_number=curr_slice,
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
-            age_intervals=age_intervals
+            age_intervals=age_intervals,
+            V2_enabled=V2_enabled
         )
 
         print('\n\tTraining Mode')
@@ -295,7 +309,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_
                 use_trained_model=FLAGS.use_trained_model,
                 use_init_model=False,
                 conditioned_enabled=conditioned_enabled,
-                progression_enabled=progression_enabled
+                progression_enabled=progression_enabled,
+                attention_loss_function=attention_loss_function
             )
             print('\n\tPre-train is done! The training will start.')
             FLAGS.use_trained_model = True
@@ -304,7 +319,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, max_regional_
             use_trained_model=FLAGS.use_trained_model,
             use_init_model=FLAGS.use_init_model,
             conditioned_enabled=conditioned_enabled,
-            progression_enabled=progression_enabled
+            progression_enabled=progression_enabled,
+            attention_loss_function=attention_loss_function
         )
     tf.reset_default_graph()
 
