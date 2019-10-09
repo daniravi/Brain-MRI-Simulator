@@ -30,7 +30,8 @@ class DaniNet(object):
                  slice_number=100,  # current MRI slice to consider
                  max_regional_expansion=10,
                  map_disease=(0, 1, 2, 2, 2, 3),
-                 age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
+                 age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87),
+                 V2_enabled=True
                  ):
 
         self.session = session
@@ -71,22 +72,27 @@ class DaniNet(object):
         self.G_img_loss = 0
         self.n_of_regions = 0
         self.initial_global_step = 0
-        self.minimum_input_similarity = 0.3 * 10 ** -13
+        self.V2_enabled=V2_enabled
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
+        if self.V2_enabled:
+            self.minimum_input_similarity = 0.3 * 10 ** -13
+        else:
+            self.minimum_input_similarity = 0
+
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
-        self.loss_weight = (2, 0.1, 0.5, 0.8, 0.4)
-        self.speed_increasing_loss_weight_pow = 0.7
+        self.loss_weight = [100, 0.0045, 0.047, 0, 0.25]
+        # loss_weight*loss_average must be equal to to a fixed value.
+        # In our case the fixed value is 0.04. This value can be anything as far the product with the weights is constant
+        self.focus_learning_rate = 0.99  # increase the value if you want to focus more
+        self.focus_learning_initial_point_multiplier = 10
         # 0)similarity with the image # the sum need to be equal to 1 (population average vs personality)
         # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
         # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smoothing vs progression)
         # 3)pixel loss  (progression)
         # 4)regional loss (progression-> reliability of progression prior)
-
-        self.loss_weight_scale = (10 ** 2, 10 ** -1, 1, 1, 1)
-        self.loss_weight = np.multiply(self.loss_weight, self.loss_weight_scale)
 
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
         self.bin_size = np.diff(self.bin_centers)
@@ -244,7 +250,8 @@ class DaniNet(object):
               use_init_model=True,  # use the init model to initialize the network
               n_epoch_to_save=20,
               conditioned_enabled=True,
-              progression_enabled=True
+              progression_enabled=True,
+              attention_loss_function=True
               ):
 
         weights = self.loss_weight.copy()
@@ -334,14 +341,31 @@ class DaniNet(object):
         batch_label_age_index = []
         batch_label_diagnosis = []
         batch_z_prior = []
+        previous_number_of_epoch = self.initial_global_step / num_batches
         for epoch in range(num_epochs):
             if enable_shuffle:
                 np.random.shuffle(file_names)
             start_time = time.time()
-            curr_epoch = epoch + self.initial_global_step / num_batches
-            weights[0] = self.loss_weight[0] / np.power((curr_epoch + 1), self.speed_increasing_loss_weight_pow)
+            curr_epoch = epoch + previous_number_of_epoch
+            if attention_loss_function:
+                finalLimit = self.loss_weight[0] / self.focus_learning_initial_point_multiplier
+                weights[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[0] - finalLimit) + finalLimit
 
-            self.define_loss_EF(progression_enabled, weights)
+                finalLimit = self.loss_weight[1] * self.focus_learning_initial_point_multiplier
+                weights[1] = finalLimit
+
+                finalLimit = self.loss_weight[2] * self.focus_learning_initial_point_multiplier
+                weights[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[2] - finalLimit) + finalLimit
+                #weights[2] = self.loss_weight[2] * (curr_epoch + 1) / ((num_epochs + previous_number_of_epoch) / self.focus_learning_initial_point_multiplier)
+
+                finalLimit = self.loss_weight[3] * self.focus_learning_initial_point_multiplier
+                weights[3] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[3] - finalLimit) + finalLimit
+
+                finalLimit = self.loss_weight[4] * self.focus_learning_initial_point_multiplier
+                weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[4] - finalLimit) + finalLimit
+
+                print(weights)
+                self.define_loss_EF(progression_enabled, weights)
 
             for ind_batch in range(num_batches):
                 # read batch images and labels
@@ -383,7 +407,7 @@ class DaniNet(object):
 
                     # curr_gender = int(str(batch_files[i]).split('/')[-1].split('_')[1])
                     for t in range(self.num_progression_points):
-                        if progression_enabled:
+                        if self.V2_enabled:
                             batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
                                                                                       np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
                         else:
@@ -748,7 +772,10 @@ class DaniNet(object):
 
     def compute_physical_constrain(self, frames_progression, selected_query_images, curr_age, fuzzy_membership):
         # deformation loss
-        pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
+        if self.V2_enabled:
+            pixel_reg_loss = 0
+        else:
+            pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
         deformation_loss = 0
         for i in range(self.num_progression_points):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
