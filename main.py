@@ -71,9 +71,8 @@ def main(_):
     conditioned_enabled = True
     progression_enabled = True
     attention_loss_function = True
-    V2_enabled = True  # fuzzy +  remove voxel loss + logistic regressor
-    test_label = 'test'
-
+    V2_enabled = True  # fuzzy + logistic regressor
+    test_label = '_test2'
     if V2_enabled:
         classifier = 1  # 1 logistic regressor
     else:
@@ -81,7 +80,7 @@ def main(_):
 
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
-
+    FLAGS.savedir = FLAGS.savedir + test_label
     max_regional_expansion = 10
     num_epochs_transfer_learning = 1000
     map_disease = (0, 1, 2, 2, 2, 3)
@@ -92,13 +91,14 @@ def main(_):
     if FLAGS.phase == 1:
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
-                 age_intervals=age_intervals, V2_enabled=V2_enabled)
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', )
+        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
+                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
     if FLAGS.phase == 2:
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
-                          attention_loss_function=attention_loss_function, output_dir='sample_TF', num_epochs=num_epochs_transfer_learning,
+                          attention_loss_function=attention_loss_function, output_dir='sample_TrLearn', num_epochs=num_epochs_transfer_learning,
                           max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
-    if FLAGS.phase == 3:
-        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir=test_label, max_regional_expansion=max_regional_expansion,
+        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test_after_TL', max_regional_expansion=max_regional_expansion,
                 map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
     if FLAGS.phase == 4:
         assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
@@ -120,7 +120,7 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
         model = DaniNet(
             session,  # TensorFlow session
             is_training=False,  # flag for training or testing mode
-            save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
+            save_dir=FLAGS.savedir,  # path to load checkpoints, samples, and summary
             dataset_name=FLAGS.datasetTL,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
             output_dir=output_dir,
@@ -149,7 +149,7 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
         model = DaniNet(
             session,  # TensorFlow session
             is_training=True,  # flag for training or testing mode
-            save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
+            save_dir=FLAGS.savedir,  # path to load and save checkpoints, samples, and summary
             dataset_name=FLAGS.datasetTL,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
             output_dir=output_dir,
@@ -282,7 +282,8 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
         nib.save(img, str(age_to_generate) + 'out.nii.gz')
 
 
-def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled):
+def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
+             output_dir):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -295,6 +296,7 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             save_dir=FLAGS.savedir,  # path to save checkpoints, samples, and summary
             dataset_name=FLAGS.dataset,  # name of the dataset in the folder ./data
             slice_number=curr_slice,
+            output_dir=output_dir,
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
             age_intervals=age_intervals,
