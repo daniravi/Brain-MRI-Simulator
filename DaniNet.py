@@ -25,7 +25,7 @@ class DaniNet(object):
                  tile_ratio=1.0,  # ratio of the length between tiled label and z
                  is_training=True,  # flag for training or testing mode
                  save_dir='./save',  # path to save checkpoints, samples, and summary
-                 output_dir='sample_TR',  # name for the folder where sample are generated
+                 output_dir='sample',  # name for the folder where sample are generated
                  dataset_name='TrainingSetMRI',  # name of the dataset in the folder ./data
                  slice_number=100,  # current MRI slice to consider
                  max_regional_expansion=10,
@@ -78,12 +78,13 @@ class DaniNet(object):
 
         if self.V2_enabled:
             self.minimum_input_similarity = 0.3 * 10 ** -13
+            self.loss_weight = [100, 0.0045, 0.040, 0.05, 0.25]
         else:
             self.minimum_input_similarity = 0
+            self.loss_weight = [100, 0.0045, 0.047, 0.22, 0.26]
 
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
-        self.loss_weight = [100, 0.0045, 0.047, 0, 0.25]
         # loss_weight*loss_average must be equal to to a fixed value.
         # In our case the fixed value is 0.04. This value can be anything as far the product with the weights is constant
         self.focus_learning_rate = 0.99  # increase the value if you want to focus more
@@ -364,7 +365,6 @@ class DaniNet(object):
                 finalLimit = self.loss_weight[4] * self.focus_learning_initial_point_multiplier
                 weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[4] - finalLimit) + finalLimit
 
-                print(weights)
                 self.define_loss_EF(progression_enabled, weights)
 
             for ind_batch in range(num_batches):
@@ -772,10 +772,7 @@ class DaniNet(object):
 
     def compute_physical_constrain(self, frames_progression, selected_query_images, curr_age, fuzzy_membership):
         # deformation loss
-        if self.V2_enabled:
-            pixel_reg_loss = 0
-        else:
-            pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
+        pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
         deformation_loss = 0
         for i in range(self.num_progression_points):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
