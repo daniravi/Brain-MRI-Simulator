@@ -31,7 +31,8 @@ class DaniNet(object):
                  max_regional_expansion=10,
                  map_disease=(0, 1, 2, 2, 2, 3),
                  age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87),
-                 V2_enabled=True
+                 V2_enabled=True,
+                 regressor_type=1
                  ):
 
         self.session = session
@@ -72,20 +73,23 @@ class DaniNet(object):
         self.G_img_loss = 0
         self.n_of_regions = 0
         self.initial_global_step = 0
-        self.V2_enabled=V2_enabled
+        self.V2_enabled = V2_enabled
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
 
+
         if self.V2_enabled:
+            self.default_weight = [100, 0.0045, 0.039, 0.15, 0.25]
             self.minimum_input_similarity = 0.3 * 10 ** -13
-            self.loss_weight = [100, 0.0045, 0.040, 0.05, 0.25]
+            self.init_loss_weight = [5, 0.045, 0.033, 0.02, 0.04]
         else:
+            self.default_weight = [10, 0.045, 0.39, 1.5, 2.5]
             self.minimum_input_similarity = 0
-            self.loss_weight = [100, 0.0045, 0.047, 0.22, 0.26]
+
 
         # ****************************************** Framework Parameters ***************************************************
-        self.bin_variance_scale = 0.2  # this is connected with the first parameter of loss_weight
-        # loss_weight*loss_average must be equal to to a fixed value.
+        self.bin_variance_scale = 0.2  # this is connected with the first parameter of init_loss_weight
+        # init_loss_weight*loss_average must be equal to to a fixed value.
         # In our case the fixed value is 0.04. This value can be anything as far the product with the weights is constant
         self.focus_learning_rate = 0.99  # increase the value if you want to focus more
         self.focus_learning_initial_point_multiplier = 10
@@ -181,7 +185,7 @@ class DaniNet(object):
             reuse_variables=True
         )
 
-        self.load_extra_data()
+        self.load_extra_data(regressor_type)
 
         self.pixel_regres_loss, self.region_regres_loss, self.deformation_loss = self.longitudinal_constrains(
             images=self.input_image,
@@ -255,7 +259,8 @@ class DaniNet(object):
               attention_loss_function=True
               ):
 
-        weights = self.loss_weight.copy()
+        weights = self.default_weight
+        resamble_weight = self.init_loss_weight.copy()
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
@@ -348,24 +353,6 @@ class DaniNet(object):
                 np.random.shuffle(file_names)
             start_time = time.time()
             curr_epoch = epoch + previous_number_of_epoch
-            if attention_loss_function:
-                finalLimit = self.loss_weight[0] / self.focus_learning_initial_point_multiplier
-                weights[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[0] - finalLimit) + finalLimit
-
-                finalLimit = self.loss_weight[1] * self.focus_learning_initial_point_multiplier
-                weights[1] = finalLimit
-
-                finalLimit = self.loss_weight[2] * self.focus_learning_initial_point_multiplier
-                weights[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[2] - finalLimit) + finalLimit
-                #weights[2] = self.loss_weight[2] * (curr_epoch + 1) / ((num_epochs + previous_number_of_epoch) / self.focus_learning_initial_point_multiplier)
-
-                finalLimit = self.loss_weight[3] * self.focus_learning_initial_point_multiplier
-                weights[3] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[3] - finalLimit) + finalLimit
-
-                finalLimit = self.loss_weight[4] * self.focus_learning_initial_point_multiplier
-                weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.loss_weight[4] - finalLimit) + finalLimit
-
-                self.define_loss_EF(progression_enabled, weights)
 
             for ind_batch in range(num_batches):
                 # read batch images and labels
@@ -454,6 +441,46 @@ class DaniNet(object):
                     self.z_prior: batch_z_prior
                 }
             )
+
+            if attention_loss_function:
+                init_w0, init_w1, init_w2, init_w3, init_w4 = self.session.run(
+                    fetches=[
+                        self.deformation_loss,
+                        self.G_img_loss,
+                        self.E_z_loss,
+                        self.pixel_regres_loss,
+                        self.region_regres_loss,
+                    ],
+                    feed_dict={
+                        self.input_image: batch_images,
+                        self.age: batch_label_age,
+                        self.age_index: batch_label_age_index,
+                        self.fuzzy_membership: batch_fuzzy_membership,
+                        self.diagnosis: batch_label_diagnosis,
+                        self.z_prior: batch_z_prior
+                    }
+                )
+                finalLimit = self.init_loss_weight[0] / self.focus_learning_initial_point_multiplier
+                resamble_weight[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[0] - finalLimit) + finalLimit
+
+                finalLimit = self.init_loss_weight[1] * self.focus_learning_initial_point_multiplier
+                resamble_weight[1] = finalLimit  # we want to learn since the start to discriminate real vs fake
+
+                finalLimit = self.init_loss_weight[2] * self.focus_learning_initial_point_multiplier
+                resamble_weight[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[2] - finalLimit) + finalLimit
+
+                finalLimit = self.init_loss_weight[3] * self.focus_learning_initial_point_multiplier
+                resamble_weight[3] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[3] - finalLimit) + finalLimit
+
+                finalLimit = self.init_loss_weight[4] * self.focus_learning_initial_point_multiplier
+                resamble_weight[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[4] - finalLimit) + finalLimit
+
+                weights[0] = resamble_weight[0] / init_w0
+                weights[1] = resamble_weight[1] / init_w1
+                weights[2] = resamble_weight[2] / init_w2
+                weights[3] = resamble_weight[3] / init_w3
+                weights[4] = resamble_weight[4] / init_w4
+                self.define_loss_EF(progression_enabled, weights)
             self.writer.add_summary(summary, self.EG_global_step.eval() + self.initial_global_step)
             print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
             elapse = time.time() - start_time
@@ -470,12 +497,15 @@ class DaniNet(object):
         # close the summary writer
         self.writer.close()
 
-    def load_extra_data(self):
+    def load_extra_data(self,regressor_type):
         mat = h5py.File('Mask/Mask_' + str(self.slice_number) + '.mat', 'r')
         self.allMask = mat['allMask'][()]
         self.allMask = self.allMask.T
         self.allMask = tf.convert_to_tensor(self.allMask, np.float32)
-        file_handler = open('Regressor/' + str(self.slice_number), 'rb')
+        if regressor_type==0:
+            file_handler = open('Regressor_0/' + str(self.slice_number), 'rb')
+        else:
+            file_handler = open('Regressor_1/' + str(self.slice_number), 'rb')
         [self.regressors, self.rescales] = pickle.load(file_handler)
 
         self.n_of_regions = np.size(self.rescales)

@@ -8,7 +8,7 @@ from sklearn.linear_model import LogisticRegression
 
 
 class progression_net(object):
-    def __init__(self, current_slice, max_regional_expansion, map_disease, classifier):
+    def __init__(self, current_slice, max_regional_expansion, map_disease, regressor_type):
         self.num_output = 1
         self.num_inputs = 4
         self.current_slice = current_slice
@@ -17,10 +17,13 @@ class progression_net(object):
         self.load_matlab_data(current_slice)
         self.max_regional_expansion = max_regional_expansion
         self.map_disease = map_disease
-        self.classifier = classifier
+        self.regressor_type = regressor_type
 
     def load_regressor(self):
-        filehandler = open('Regressor/' + str(self.current_slice), 'rb')
+        if self.regressor_type==0:
+            filehandler = open('Regressor_0/' + str(self.current_slice), 'rb')
+        else:
+            filehandler = open('Regressor_1/' + str(self.current_slice), 'rb')
         [all_regressor, all_scaler] = pickle.load(filehandler)
         filehandler.close()
         return all_regressor, all_scaler
@@ -48,7 +51,7 @@ class progression_net(object):
 
         y = y[np.reshape(correct_index, (-1))]
         X = X[np.reshape(correct_index, (-1)), :]
-        if self.classifier == 0:
+        if self.regressor_type == 0:
             clf = SVR(C=100, coef0=0.0, degree=1, epsilon=0.005, gamma='auto',
                       kernel='linear', max_iter=-1, shrinking=True, tol=0.000001, verbose=True)
         else:
@@ -74,7 +77,10 @@ class progression_net(object):
 
         all_regressor.append(pipeline)
         all_scaler.append(y_n)
-        filehandler = open('Regressor/' + str(self.current_slice), 'wb')
+        if self.regressor_type==0:
+            filehandler = open('Regressor_0/' + str(self.current_slice), 'wb')
+        else:
+            filehandler = open('Regressor_1/' + str(self.current_slice), 'wb')
         pickle.dump([all_regressor, all_scaler], filehandler)
         filehandler.close()
         return 1

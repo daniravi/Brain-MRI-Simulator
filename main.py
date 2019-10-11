@@ -32,8 +32,9 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
+parser.add_argument('--conf', type=int, default=3)
 parser.add_argument('--phase', type=int, default=1)
-parser.add_argument('--epoch', type=int, default=400, help='number of epochs')
+parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
 parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testing dataset name that stored in ./data')
@@ -45,21 +46,30 @@ parser.add_argument('--slice', type=int, default=100, help='slice')
 FLAGS = parser.parse_args()
 
 
-def train_regressors(max_regional_expansion, map_disease, classifier):
+def train_regressors(max_regional_expansion, map_disease, regressor_type):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     maxNumberOfRegion = 1000
-    if not os.path.isdir('Regressor'):
-        os.mkdir('Regressor')
+    if regressor_type==0:
+        if not os.path.isdir('Regressor_0'):
+            os.mkdir('Regressor_0')
+    else:
+        if not os.path.isdir('Regressor_1'):
+            os.mkdir('Regressor_1')
     for j in range(40, 143):
-        filehandler = open('Regressor/' + str(j), 'wb')
-        pickle.dump([[], []], filehandler)
-        filehandler.close()
+        if regressor_type == 0:
+            filehandler = open('Regressor_0/' + str(j), 'wb')
+            pickle.dump([[], []], filehandler)
+            filehandler.close()
+        else:
+            filehandler = open('Regressor_1/' + str(j), 'wb')
+            pickle.dump([[], []], filehandler)
+            filehandler.close()
         print(j)
         for i in range(0, maxNumberOfRegion):
             tf.reset_default_graph()
             with tf.Session(config=config):
-                model = progression_net(current_slice=j, max_regional_expansion=max_regional_expansion, map_disease=map_disease, classifier=classifier)
+                model = progression_net(current_slice=j, max_regional_expansion=max_regional_expansion, map_disease=map_disease, regressor_type=regressor_type)
                 if model.train_and_save(current_region=i):
                     print(i)
                     model.test(current_region=i)
@@ -68,50 +78,85 @@ def train_regressors(max_regional_expansion, map_disease, classifier):
 
 
 def main(_):
-    conditioned_enabled = True
-    progression_enabled = True
-    attention_loss_function = True
-    V2_enabled = True  # fuzzy + logistic regressor
-    test_label = '_test2'
-    if V2_enabled:
-        classifier = 1  # 1 logistic regressor
+    conditioned_enabled = False
+    progression_enabled = False
+    attention_loss_function = False
+    V2_enabled = False  # fuzzy + logistic regressor
+    test_label = ''
+
+    if FLAGS.conf == 0:
+        conditioned_enabled = False
+        progression_enabled = False
+        attention_loss_function = False
+        V2_enabled = False
+        test_label = '_baseline'
+        print('Select baseline configuration')
+    elif FLAGS.conf == 1:
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = False
+        V2_enabled = False
+        test_label = '_DaniNet-V1'
+        print('Select DaniNet-V1 configuration')
+    elif FLAGS.conf == 2:
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = False
+        V2_enabled = True
+        test_label = '_DaniNet-V2'
+        print('Select DaniNet-V2 configuration')
+    elif FLAGS.conf == 3:
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = True
+        V2_enabled = True  # fuzzy + logistic regressor
+        test_label = '_DaniNet-V2_AL'
+        print('Select DaniNet-V2_AL configuration')
     else:
-        classifier = 0  # 0 support vector regressor
+        print('Please select one of the available modality.')
+        exit()
+
+    if V2_enabled:
+        regressor_type = 1  # 1 logistic regressor
+    else:
+        regressor_type = 0  # 0 support vector regressor
 
     # ResearchGroup = {'Cognitive normal', 'Subjective memory concern', 'Early mild cognitive Impairment', 'Mild cognitive impairment',
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     FLAGS.savedir = FLAGS.savedir + test_label
     max_regional_expansion = 10
-    num_epochs_transfer_learning = 1000
+    num_epochs_transfer_learning = 800
     map_disease = (0, 1, 2, 2, 2, 3)
     age_intervals = (63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
 
     if FLAGS.phase == 0:
-        train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, classifier=classifier)
+        train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, regressor_type=regressor_type)
     if FLAGS.phase == 1:
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
-                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', )
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type)
         testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
-                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
+                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 2:
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                           attention_loss_function=attention_loss_function, output_dir='sample_TrLearn', num_epochs=num_epochs_transfer_learning,
-                          max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
-        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test_after_TL', max_regional_expansion=max_regional_expansion,
-                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled)
-    if FLAGS.phase == 4:
+                          max_regional_expansion=max_regional_expansion, map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled,
+                          regressor_type=regressor_type)
+        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test_after_TL',
+                max_regional_expansion=max_regional_expansion,
+                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
+    if FLAGS.phase == 3:
         assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
-    if FLAGS.phase == 5:
+    if FLAGS.phase == 4:
         GUI()
-    if FLAGS.phase == 6:
+    if FLAGS.phase == 5:
         # validation_folder = os.path.join('./data', FLAGS.datasetGT)
         # TL_folder = os.path.join('./data', FLAGS.datasetTL)
         # validation(validation_folder, TL_folder, FLAGS.slice, test_label, age_intervals)
         extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii')
 
 
-def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled):
+def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled,regressor_type):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -127,7 +172,8 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
             age_intervals=age_intervals,
-            V2_enabled=V2_enabled
+            V2_enabled=V2_enabled,
+            regressor_type=regressor_type
 
         )
         print('\n\tTesting Mode')
@@ -140,7 +186,7 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
 
 
 def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, output_dir, num_epochs, max_regional_expansion,
-                      map_disease, age_intervals, V2_enabled):
+                      map_disease, age_intervals, V2_enabled,regressor_type):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -156,7 +202,8 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
             age_intervals=age_intervals,
-            V2_enabled=V2_enabled
+            V2_enabled=V2_enabled,
+            regressor_type=regressor_type
         )
         print('\n\tTransfer learning mode')
         model.train(
@@ -283,7 +330,7 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
-             output_dir):
+             output_dir,regressor_type):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -300,7 +347,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             max_regional_expansion=max_regional_expansion,
             map_disease=map_disease,
             age_intervals=age_intervals,
-            V2_enabled=V2_enabled
+            V2_enabled=V2_enabled,
+            regressor_type=regressor_type
         )
 
         print('\n\tTraining Mode')
