@@ -39,8 +39,12 @@ class progression_net(object):
     def test(self, current_region):
         [all_regressor, all_scaler] = self.load_regressor()
         X, Y = self.load_region_data(current_region)
-        result = all_regressor[current_region].predict_proba(X)
-        prediction = np.reshape(result[:, 0], [-1, 1])
+        if self.regressor_type ==0:
+            result = all_regressor[current_region].predict(X)
+            prediction = np.reshape(result[:], [-1, 1])
+        else:
+            result = all_regressor[current_region].predict_proba(X)
+            prediction = np.reshape(result[:, 0], [-1, 1])
         print(np.concatenate((X[:50, :], Y[:50], all_scaler[current_region].inverse_transform(prediction[:50])), axis=1))
         return
 
@@ -52,8 +56,8 @@ class progression_net(object):
         y = y[np.reshape(correct_index, (-1))]
         X = X[np.reshape(correct_index, (-1)), :]
         if self.regressor_type == 0:
-            clf = SVR(C=100, coef0=0.0, degree=1, epsilon=0.005, gamma='auto',
-                      kernel='linear', max_iter=-1, shrinking=True, tol=0.000001, verbose=True)
+            clf = SVR(C=10, coef0=0.0, degree=1, epsilon=0.05, gamma='auto',
+                      kernel='linear', max_iter=-1, shrinking=True, tol=0.001, verbose=True)
         else:
             clf = LogisticRegression(max_iter=100000000, tol=0.000001,
                                      C=1.0, class_weight='balanced', fit_intercept=True,
