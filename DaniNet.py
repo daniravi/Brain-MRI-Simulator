@@ -76,17 +76,15 @@ class DaniNet(object):
         self.V2_enabled = V2_enabled
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
-
+        self.regressor_type = regressor_type
 
         if self.V2_enabled:
-            self.default_weight = [100, 0.0045, 0.039, 0.15, 0.25]
+            self.default_weight = [100, 0.0043, 0.06, 0.2, 0.28]
             self.minimum_input_similarity = 0.3 * 10 ** -13
-            self.init_loss_weight = [5, 0.045, 0.033, 0.02, 0.04]
+            self.init_loss_weight = [1, 0.043, 0.06, 0.07, 0.07]
         else:
-            self.default_weight = [10, 0.045, 0.39, 1.5, 2.5]
+            self.default_weight = [0.5, 0.0002, 0.0005, 0.007, 0.007]
             self.minimum_input_similarity = 0
-
-
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of init_loss_weight
         # init_loss_weight*loss_average must be equal to to a fixed value.
@@ -260,7 +258,8 @@ class DaniNet(object):
               ):
 
         weights = self.default_weight
-        resamble_weight = self.init_loss_weight.copy()
+        if attention_loss_function:
+            resamble_weight = self.init_loss_weight.copy()
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
@@ -375,7 +374,7 @@ class DaniNet(object):
                 batch_fuzzy_membership = np.ones(
                     shape=(len(batch_files), self.num_progression_points),
                     dtype=np.float
-                ) * self.image_value_range[0]
+                ) * 0
                 batch_label_age_index = np.ones(
                     shape=(len(batch_files)),
                     dtype=np.int
@@ -398,7 +397,7 @@ class DaniNet(object):
                             batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
                                                                                       np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
                         else:
-                            batch_fuzzy_membership[i, label] = self.image_value_range[-1]
+                            batch_fuzzy_membership[i, age_index] = self.image_value_range[-1]
                     if not use_init_model:
                         curr_diagnosis = random.randint(0, max(self.map_disease))
                     else:
@@ -497,12 +496,12 @@ class DaniNet(object):
         # close the summary writer
         self.writer.close()
 
-    def load_extra_data(self,regressor_type):
+    def load_extra_data(self, regressor_type):
         mat = h5py.File('Mask/Mask_' + str(self.slice_number) + '.mat', 'r')
         self.allMask = mat['allMask'][()]
         self.allMask = self.allMask.T
         self.allMask = tf.convert_to_tensor(self.allMask, np.float32)
-        if regressor_type==0:
+        if regressor_type == 0:
             file_handler = open('Regressor_0/' + str(self.slice_number), 'rb')
         else:
             file_handler = open('Regressor_1/' + str(self.slice_number), 'rb')
@@ -759,8 +758,12 @@ class DaniNet(object):
             size_frame=[self.num_progression_points, self.numb_of_sample]
         )
 
-    def normalized_regressors(self, current_region, x):
+    def normalized_regressors_1(self, current_region, x):
         return self.rescales[current_region].inverse_transform(self.regressors[current_region].predict_proba(x))
+
+    def normalized_regressors_0(self, current_region, x):
+        return np.power(self.rescales[current_region].inverse_transform(self.regressors[current_region].predict(x)),2)
+
 
     def check_next_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
         region_loss = self.compute_region_loss(index1, index2, frames_progression, curr_diagnosis, region_loss)
@@ -779,7 +782,11 @@ class DaniNet(object):
             tf.cast(self.bin_centers_tensor[index2], tf.float32),
             tf.cast(curr_diagnosis[0] + 1, tf.float32)], 0)
 
-        prediction_intensity_rate_change = tf.py_func(self.normalized_regressors, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
+        if self.regressor_type == 0:
+            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors_0, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
+
+        else:
+            prediction_intensity_rate_change = tf.py_func(self.normalized_regressors_1, [current_region, tf.reshape(featureVector, (1, -1))], tf.float64)
         intensity_rate_change = tf.reshape((regional_intensity_sum1[current_region] + 0.1) / (regional_intensity_sum2[current_region] + 0.1), (1, 1))
         region_loss = region_loss + tf.reduce_min(
             [tf.losses.mean_squared_error(prediction_intensity_rate_change, intensity_rate_change), self.max_regional_expansion]) \
@@ -808,6 +815,7 @@ class DaniNet(object):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
             deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(intensity_rate_changeFrame - selected_query_images)) * \
                                (fuzzy_membership[i] + self.minimum_input_similarity)
+            #deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(frames_progression - selected_query_images))
 
         return pixel_reg_loss, deformation_loss
 
