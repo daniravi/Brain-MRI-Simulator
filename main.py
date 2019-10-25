@@ -41,7 +41,7 @@ parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testi
 parser.add_argument('--savedir', type=str, default='save', help='dir of saving checkpoints and intermediate training results')
 parser.add_argument('--use_trained_model', type=str2bool, default=True, help='whether train from an existing model or from scratch')
 parser.add_argument('--use_init_model', type=str2bool, default=True, help='whether train from the init model if cannot find an existing model')
-parser.add_argument('--slice', type=int, default=100, help='slice')
+parser.add_argument('--slice', type=int, default=98, help='slice')
 
 FLAGS = parser.parse_args()
 
@@ -127,7 +127,7 @@ def main(_):
     max_regional_expansion = 10
     num_epochs_transfer_learning = 800
     map_disease = (0, 1, 2, 2, 2, 3)
-    age_intervals = (63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87)
+    age_intervals = (63, 66.4, 69.1, 71, 72.4, 74, 75.6, 77.4, 79.4, 81.7, 87)
 
     if FLAGS.phase == 0:
         train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, regressor_type=regressor_type)
