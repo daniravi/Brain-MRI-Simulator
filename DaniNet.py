@@ -79,15 +79,15 @@ class DaniNet(object):
         self.regressor_type = regressor_type
 
         if self.V2_enabled:
-            self.default_weight = [100, 0.0043, 0.06, 0.2, 0.28]
+            #self.default_weight = [2, 0.08, 0.4, 0.05, 0.08]
+            self.default_weight = [100, 0.0045, 0.08, 0.25, 0.5]
             self.minimum_input_similarity = 0.3 * 10 ** -13
-            self.init_loss_weight = [1, 0.043, 0.06, 0.07, 0.07]
         else:
-            self.default_weight = [0.5, 0.0002, 0.0005, 0.007, 0.007]
+            self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
         # ****************************************** Framework Parameters ***************************************************
-        self.bin_variance_scale = 0.2  # this is connected with the first parameter of init_loss_weight
-        # init_loss_weight*loss_average must be equal to to a fixed value.
+        self.bin_variance_scale = 0.2  # this is connected with the first parameter of default_weight
+        # default_weight*loss_average must be equal to to a fixed value.
         # In our case the fixed value is 0.04. This value can be anything as far the product with the weights is constant
         self.focus_learning_rate = 0.99  # increase the value if you want to focus more
         self.focus_learning_initial_point_multiplier = 10
@@ -251,22 +251,20 @@ class DaniNet(object):
               enable_shuffle=True,  # enable shuffle of the dataset
               use_trained_model=True,  # use the saved checkpoint to initialize the network
               use_init_model=True,  # use the init model to initialize the network
-              n_epoch_to_save=20,
+              n_epoch_to_save=5,
               conditioned_enabled=True,
               progression_enabled=True,
               attention_loss_function=True
               ):
 
-        weights = self.default_weight
-        if attention_loss_function:
-            resamble_weight = self.init_loss_weight.copy()
+        current_weights = self.default_weight
         file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
         if enable_shuffle:
             np.random.shuffle(file_names)
 
-        self.define_loss_EF(progression_enabled, weights)
+        self.define_loss_EF(progression_enabled, current_weights)
         self.loss_Dz = self.D_z_loss_prior + self.D_z_loss_z
         self.loss_Di = self.D_img_loss_input + self.D_img_loss_G
 
@@ -459,37 +457,38 @@ class DaniNet(object):
                         self.z_prior: batch_z_prior
                     }
                 )
-                finalLimit = self.init_loss_weight[0] / self.focus_learning_initial_point_multiplier
-                resamble_weight[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[0] - finalLimit) + finalLimit
+                finalLimit = self.default_weight[0] / self.focus_learning_initial_point_multiplier
+                current_weights[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[0] - finalLimit) + finalLimit
 
-                finalLimit = self.init_loss_weight[1] * self.focus_learning_initial_point_multiplier
-                resamble_weight[1] = finalLimit  # we want to learn since the start to discriminate real vs fake
+                finalLimit = self.default_weight[1] * self.focus_learning_initial_point_multiplier
+                current_weights[1] = finalLimit  # we want to learn since the start to discriminate real vs fake
 
-                finalLimit = self.init_loss_weight[2] * self.focus_learning_initial_point_multiplier
-                resamble_weight[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[2] - finalLimit) + finalLimit
+                finalLimit = self.default_weight[2] * self.focus_learning_initial_point_multiplier  * 3
+                current_weights[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[2] - finalLimit) + finalLimit
 
-                finalLimit = self.init_loss_weight[3] * self.focus_learning_initial_point_multiplier
-                resamble_weight[3] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[3] - finalLimit) + finalLimit
+                finalLimit = self.default_weight[3] * self.focus_learning_initial_point_multiplier
+                current_weights[3] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[3] - finalLimit) + finalLimit
 
-                finalLimit = self.init_loss_weight[4] * self.focus_learning_initial_point_multiplier
-                resamble_weight[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.init_loss_weight[4] - finalLimit) + finalLimit
+                finalLimit = self.default_weight[4] * self.focus_learning_initial_point_multiplier
+                current_weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[4] - finalLimit) + finalLimit
 
-                weights[0] = resamble_weight[0] / init_w0
-                weights[1] = resamble_weight[1] / init_w1
-                weights[2] = resamble_weight[2] / init_w2
-                weights[3] = resamble_weight[3] / init_w3
-                weights[4] = resamble_weight[4] / init_w4
-                self.define_loss_EF(progression_enabled, weights)
+                current_weights[0] = current_weights[0] / init_w0 * 0.02
+                current_weights[1] = current_weights[1] / init_w1 * 17.12
+                current_weights[2] = current_weights[2] / init_w2 * 7
+                current_weights[3] = current_weights[3] / init_w3 * 0.16
+                current_weights[4] = current_weights[4] / init_w4 * 0.11
+
+                self.define_loss_EF(progression_enabled, current_weights)
             self.writer.add_summary(summary, self.EG_global_step.eval() + self.initial_global_step)
             print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
             elapse = time.time() - start_time
             print(time.strftime("Time: %H:%M:%S", time.gmtime(elapse)))
             # save sample images for each epoch
             name = '{:02d}.png'.format(epoch + 1)
-            self.test(batch_images, batch_label_diagnosis, name)
             # save checkpoint for each 3 epoch
             if np.mod(epoch, n_epoch_to_save) == n_epoch_to_save - 1:
                 self.save_checkpoint()
+                self.test(batch_images, batch_label_diagnosis, name)
 
         # save the trained model
         self.save_checkpoint()
