@@ -32,7 +32,8 @@ class DaniNet(object):
                  map_disease=(0, 1, 2, 2, 2, 3),
                  age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87),
                  V2_enabled=True,
-                 regressor_type=1
+                 regressor_type=1,
+                 attention_loss_function=1
                  ):
 
         self.session = session
@@ -77,11 +78,20 @@ class DaniNet(object):
         self.numb_of_sample = int(np.sqrt(size_batch))
         self.n_of_diagnosis = np.size(np.unique(map_disease))
         self.regressor_type = regressor_type
-
+        self.attention_loss_function = attention_loss_function
         if self.V2_enabled:
-            #self.default_weight = [2, 0.08, 0.4, 0.05, 0.08]
-            self.default_weight = [100, 0.0045, 0.08, 0.25, 0.5]
-            self.minimum_input_similarity = 0.3 * 10 ** -13
+            if self.attention_loss_function == 1:
+                # self.default_weight = [100, 0.00045, 0.005, 0.06, 0.065]
+                # self.default_weight = [100, 0.0005, 0.005, 0.25, 0.25]
+                # self.default_weight = [100, 0.0025, 0.05, 1.25, 1.25]
+                self.default_weight = [100, 0.002, 0.05, 1.25, 1.25]
+                self.minimum_input_similarity = 0.3 * 10 ** -15
+            elif self.attention_loss_function == 0:
+                self.default_weight = [100, 0.005, 0.05, 2.5, 2.5]
+                self.minimum_input_similarity = 0.3 * 10 ** -13
+            elif self.attention_loss_function == 2:
+                self.default_weight = [70, 0.01, 0.1, 5, 5]
+                self.minimum_input_similarity = 0.3 * 10 ** -13
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
@@ -251,10 +261,9 @@ class DaniNet(object):
               enable_shuffle=True,  # enable shuffle of the dataset
               use_trained_model=True,  # use the saved checkpoint to initialize the network
               use_init_model=True,  # use the init model to initialize the network
-              n_epoch_to_save=5,
+              n_epoch_to_save=20,
               conditioned_enabled=True,
               progression_enabled=True,
-              attention_loss_function=True
               ):
 
         current_weights = self.default_weight
@@ -439,31 +448,14 @@ class DaniNet(object):
                 }
             )
 
-            if attention_loss_function:
-                init_w0, init_w1, init_w2, init_w3, init_w4 = self.session.run(
-                    fetches=[
-                        self.deformation_loss,
-                        self.G_img_loss,
-                        self.E_z_loss,
-                        self.pixel_regres_loss,
-                        self.region_regres_loss,
-                    ],
-                    feed_dict={
-                        self.input_image: batch_images,
-                        self.age: batch_label_age,
-                        self.age_index: batch_label_age_index,
-                        self.fuzzy_membership: batch_fuzzy_membership,
-                        self.diagnosis: batch_label_diagnosis,
-                        self.z_prior: batch_z_prior
-                    }
-                )
+            if self.attention_loss_function == 1:
                 finalLimit = self.default_weight[0] / self.focus_learning_initial_point_multiplier
                 current_weights[0] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[0] - finalLimit) + finalLimit
 
                 finalLimit = self.default_weight[1] * self.focus_learning_initial_point_multiplier
-                current_weights[1] = finalLimit  # we want to learn since the start to discriminate real vs fake
+                current_weights[1] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[1] - finalLimit) + finalLimit
 
-                finalLimit = self.default_weight[2] * self.focus_learning_initial_point_multiplier  * 3
+                finalLimit = self.default_weight[2] * self.focus_learning_initial_point_multiplier
                 current_weights[2] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[2] - finalLimit) + finalLimit
 
                 finalLimit = self.default_weight[3] * self.focus_learning_initial_point_multiplier
@@ -471,12 +463,6 @@ class DaniNet(object):
 
                 finalLimit = self.default_weight[4] * self.focus_learning_initial_point_multiplier
                 current_weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[4] - finalLimit) + finalLimit
-
-                current_weights[0] = current_weights[0] / init_w0 * 0.02
-                current_weights[1] = current_weights[1] / init_w1 * 17.12
-                current_weights[2] = current_weights[2] / init_w2 * 7
-                current_weights[3] = current_weights[3] / init_w3 * 0.16
-                current_weights[4] = current_weights[4] / init_w4 * 0.11
 
                 self.define_loss_EF(progression_enabled, current_weights)
             self.writer.add_summary(summary, self.EG_global_step.eval() + self.initial_global_step)
@@ -761,8 +747,7 @@ class DaniNet(object):
         return self.rescales[current_region].inverse_transform(self.regressors[current_region].predict_proba(x))
 
     def normalized_regressors_0(self, current_region, x):
-        return np.power(self.rescales[current_region].inverse_transform(self.regressors[current_region].predict(x)),2)
-
+        return np.power(self.rescales[current_region].inverse_transform(self.regressors[current_region].predict(x)), 2)
 
     def check_next_longitud_points(self, index1, index2, frames_progression, curr_diagnosis, region_loss):
         region_loss = self.compute_region_loss(index1, index2, frames_progression, curr_diagnosis, region_loss)
@@ -814,8 +799,6 @@ class DaniNet(object):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
             deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(intensity_rate_changeFrame - selected_query_images)) * \
                                (fuzzy_membership[i] + self.minimum_input_similarity)
-            #deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(frames_progression - selected_query_images))
-
         return pixel_reg_loss, deformation_loss
 
     def voxel_based_constrain(self, frames_progression, selected_query_images, curr_age):
