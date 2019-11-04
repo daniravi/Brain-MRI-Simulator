@@ -17,8 +17,8 @@ from datetime import datetime
 import re
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-environ['PATH'] = environ['PATH'] + ':/usr/local/fsl/bin'
-environ['FSLDIR'] = '/usr/local/fsl'
+environ['PATH'] = environ['PATH'] + ':/usr/local/fsl/bin' #':/share/apps/fsl-6.0.1/bin'
+environ['FSLDIR'] = '/usr/local/fsl' #'/share/apps/fsl-6.0.1'
 environ['FSLOUTPUTTYPE'] = 'NIFTI'
 
 
@@ -33,7 +33,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--conf', type=int, default=3)
-parser.add_argument('--phase', type=int, default=1)
+parser.add_argument('--phase', type=int, default=2)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -41,7 +41,7 @@ parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testi
 parser.add_argument('--savedir', type=str, default='save', help='dir of saving checkpoints and intermediate training results')
 parser.add_argument('--use_trained_model', type=str2bool, default=True, help='whether train from an existing model or from scratch')
 parser.add_argument('--use_init_model', type=str2bool, default=True, help='whether train from the init model if cannot find an existing model')
-parser.add_argument('--slice', type=int, default=98, help='slice')
+parser.add_argument('--slice', type=int, default=100, help='slice')
 
 FLAGS = parser.parse_args()
 
@@ -50,7 +50,7 @@ def train_regressors(max_regional_expansion, map_disease, regressor_type):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     maxNumberOfRegion = 1000
-    if regressor_type==0:
+    if regressor_type == 0:
         if not os.path.isdir('Regressor_0'):
             os.mkdir('Regressor_0')
     else:
@@ -125,7 +125,7 @@ def main(_):
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     FLAGS.savedir = FLAGS.savedir + test_label
     max_regional_expansion = 10
-    num_epochs_transfer_learning = 800
+    num_epochs_transfer_learning = 500
     map_disease = (0, 1, 2, 2, 2, 3)
     age_intervals = (63, 66.4, 69.1, 71, 72.4, 74, 75.6, 77.4, 79.4, 81.7, 87)
 
@@ -135,8 +135,8 @@ def main(_):
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
                  age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type)
-        testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
-                map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
+        #testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
+        #        map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 2:
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                           attention_loss_function=attention_loss_function, output_dir='sample_TrLearn', num_epochs=num_epochs_transfer_learning,
@@ -156,7 +156,7 @@ def main(_):
         extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii')
 
 
-def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled,regressor_type):
+def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -174,7 +174,6 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
             age_intervals=age_intervals,
             V2_enabled=V2_enabled,
             regressor_type=regressor_type
-
         )
         print('\n\tTesting Mode')
         model.testing(
@@ -186,11 +185,11 @@ def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion,
 
 
 def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, output_dir, num_epochs, max_regional_expansion,
-                      map_disease, age_intervals, V2_enabled,regressor_type):
+                      map_disease, age_intervals, V2_enabled, regressor_type):
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-
+    attention_loss_function= 2
     with tf.Session(config=config) as session:
         model = DaniNet(
             session,  # TensorFlow session
@@ -203,17 +202,17 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
             map_disease=map_disease,
             age_intervals=age_intervals,
             V2_enabled=V2_enabled,
-            regressor_type=regressor_type
+            regressor_type=regressor_type,
+            attention_loss_function=attention_loss_function
         )
         print('\n\tTransfer learning mode')
         model.train(
             num_epochs=num_epochs,
             use_trained_model=FLAGS.use_trained_model,
             use_init_model=FLAGS.use_init_model,
-            n_epoch_to_save=num_epochs,
+            n_epoch_to_save=num_epochs/50,
             conditioned_enabled=conditioned_enabled,
-            progression_enabled=progression_enabled,
-            attention_loss_function=attention_loss_function
+            progression_enabled=progression_enabled
         )
     tf.reset_default_graph()
 
@@ -330,7 +329,7 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
-             output_dir,regressor_type):
+             output_dir, regressor_type):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -348,7 +347,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             map_disease=map_disease,
             age_intervals=age_intervals,
             V2_enabled=V2_enabled,
-            regressor_type=regressor_type
+            regressor_type=regressor_type,
+            attention_loss_function=attention_loss_function
         )
 
         print('\n\tTraining Mode')
@@ -359,8 +359,7 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
                 use_trained_model=FLAGS.use_trained_model,
                 use_init_model=False,
                 conditioned_enabled=conditioned_enabled,
-                progression_enabled=progression_enabled,
-                attention_loss_function=attention_loss_function
+                progression_enabled=progression_enabled
             )
             print('\n\tPre-train is done! The training will start.')
             FLAGS.use_trained_model = True
@@ -369,8 +368,7 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             use_trained_model=FLAGS.use_trained_model,
             use_init_model=FLAGS.use_init_model,
             conditioned_enabled=conditioned_enabled,
-            progression_enabled=progression_enabled,
-            attention_loss_function=attention_loss_function
+            progression_enabled=progression_enabled
         )
     tf.reset_default_graph()
 
