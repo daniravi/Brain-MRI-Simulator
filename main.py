@@ -7,18 +7,12 @@ from progression_net import progression_net
 import pickle
 import pprint
 import numpy as np
-from matplotlib.pyplot import imread
-import nibabel as nib
-from scipy.misc import imread
 from GUI import GUI
-import skfuzzy
-import fnmatch
 from datetime import datetime
+import MRI_assembler as MRI_assembler
 import re
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-environ['PATH'] = environ['PATH'] + ':/usr/local/fsl/bin' #':/share/apps/fsl-6.0.1/bin'
-environ['FSLDIR'] = '/usr/local/fsl' #'/share/apps/fsl-6.0.1'
 environ['FSLOUTPUTTYPE'] = 'NIFTI'
 
 
@@ -32,8 +26,8 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=3)
-parser.add_argument('--phase', type=int, default=2)
+parser.add_argument('--conf', type=int, default=1)
+parser.add_argument('--phase', type=int, default=3)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -134,7 +128,7 @@ def main(_):
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
                  age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type)
-        #testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
+        # testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
         #        map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 2:
         transfer_learning(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
@@ -145,14 +139,21 @@ def main(_):
                 max_regional_expansion=max_regional_expansion,
                 map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 3:
-        assembly_MRI('71.0712_1_2_1_ADNI_126_S_5243_MR_MT1__N3m_Br_20130724140336799_S195168_I382272.nii.png', test_label, 65, age_intervals)
+        test_label = 'sample_Test_after_TL'
+        outputFolder = 'SyntheticMRI_V1'
+        type_of_assembly = 0  # 0: input image; 1: 3d spatial-consistency
+        if type_of_assembly == 0:
+            outputFolder = 'InputMRI'
+        if not os.path.exists(outputFolder):
+            os.mkdir(outputFolder)
+        MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
+
     if FLAGS.phase == 4:
         GUI()
     if FLAGS.phase == 5:
-        # validation_folder = os.path.join('./data', FLAGS.datasetGT)
-        # TL_folder = os.path.join('./data', FLAGS.datasetTL)
-        # validation(validation_folder, TL_folder, FLAGS.slice, test_label, age_intervals)
-        extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii')
+        # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
+        fsl_bin_dir = '/usr/local/fsl'
+        extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii', fsl_bin_dir)
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):
@@ -210,82 +211,17 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
             num_epochs=num_epochs,
             use_trained_model=FLAGS.use_trained_model,
             use_init_model=FLAGS.use_init_model,
-            n_epoch_to_save=num_epochs/50,
+            n_epoch_to_save=num_epochs / 50,
             conditioned_enabled=conditioned_enabled,
             progression_enabled=progression_enabled
         )
     tf.reset_default_graph()
 
 
-def generate_MRI_slice(generated_images, age_to_generate, age_intervals):
-    bin_centers = np.convolve(age_intervals, [0.5, 0.5], 'valid')
-    generated_image = np.zeros([128, 128])
-    batch_fuzzy_membership = np.zeros(10)
-    for t in range(10):
-        batch_fuzzy_membership[t] = skfuzzy.membership.gaussmf(age_to_generate, bin_centers[t], 1.5)
-        generated_image = generated_image + generated_images[:128, (t * 128):((t + 1) * 128)] * batch_fuzzy_membership[t]
+def extract_volumes(input_file, fsl_bin_dir):
+    environ['PATH'] = environ['PATH'] + ':' + fsl_bin_dir + '/bin'
+    environ['FSLDIR'] = fsl_bin_dir
 
-    generated_image = (generated_image - np.min(generated_image)) / (np.max(generated_image) - np.min(generated_image))
-    return generated_image
-
-
-def generate_MRI_slice_average_5(curr_slice, folder, fileName):
-    a = np.ones((5, 128 * 10, 128 * 10), dtype=np.float)
-    a[0, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
-    a[1, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
-    a[2, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
-    a[3, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
-    a[4, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
-    return a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
-
-
-def hist_norm(source, template):
-    old_type = source.dtype
-    old_shape = source.shape
-    source = source.ravel()
-    template = template.ravel()
-
-    s_values, bin_idx, s_counts = np.unique(source, return_inverse=True,
-                                            return_counts=True)
-    t_values, t_counts = np.unique(template, return_counts=True)
-    s_quantiles = np.cumsum(s_counts).astype(np.float64)
-    s_quantiles /= s_quantiles[-1]
-    t_quantiles = np.cumsum(t_counts).astype(np.float64)
-    t_quantiles /= t_quantiles[-1]
-    interp_t_values = np.interp(s_quantiles, t_quantiles, t_values)
-    interp_t_values = interp_t_values.astype(old_type)
-
-    return interp_t_values[bin_idx].reshape(old_shape)
-
-
-def validation(validation_folder, TL_folder, curr_slice, output_dir, age_intervals):
-    from skimage import measure
-    from matplotlib import pyplot
-
-    all_GT = os.listdir(validation_folder + '/' + str(curr_slice) + '/')
-    final_similarity = 0
-    for currentGT in all_GT:
-        current_patient_id = currentGT.split('ADNI_')[1][:10]
-        currentGT_image = imread(validation_folder + '/' + str(curr_slice) + '/' + currentGT)
-        first_scan_name = fnmatch.filter(os.listdir(TL_folder + '/' + str(curr_slice) + '/'), '*' + str(current_patient_id) + '*')
-        first_scan_name = first_scan_name[0]
-        input_image = imread(TL_folder + '/' + str(curr_slice) + '/' + first_scan_name)
-        generate_pred_scan = generate_MRI_slice_average_5(curr_slice, output_dir, first_scan_name)
-        generate_pred_scan = generate_MRI_slice(generate_pred_scan, np.float32(currentGT.split('_')[0]), age_intervals)
-        generate_pred_scan = hist_norm(generate_pred_scan, input_image)
-        show_results = 0
-        if show_results:
-            pyplot.imshow(generate_pred_scan)
-            pyplot.show()
-            pyplot.imshow(currentGT_image)
-            pyplot.show()
-            pyplot.imshow(input_image)
-            pyplot.show()
-        final_similarity = [final_similarity, measure.compare_ssim(generate_pred_scan, currentGT_image)]
-    return final_similarity
-
-
-def extract_volumes(input_file):
     start_time = datetime.now()
     os.system('mkdir FSL_file')
     os.system('cp ' + input_file + ' ./FSL_file/input.nii')
@@ -312,20 +248,6 @@ def extract_volumes(input_file):
     for i in range(np.size(lines) - 5, np.size(lines)):
         Vol = np.append(Vol, re.findall('\d+\.\d+', lines[i])[0])
     print(Vol)
-
-
-def assembly_MRI(fileName, folder, age_to_generate, age_intervals):
-    curr_slice = 103
-    numb_Slice = 30
-
-    final_MRI = np.ones((numb_Slice, 128, 128), dtype=np.int16)
-    for i in range(0, numb_Slice):
-        progression_MRI = generate_MRI_slice_average_5(curr_slice, folder, fileName)
-        final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
-
-        curr_slice = curr_slice + 1
-        img = nib.Nifti1Image(final_MRI, np.eye(4))
-        nib.save(img, str(age_to_generate) + 'out.nii.gz')
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
