@@ -9,7 +9,6 @@ import pickle
 import skfuzzy
 import random
 
-
 class DaniNet(object):
     def __init__(self,
                  session,  # TensorFlow session
@@ -57,7 +56,7 @@ class DaniNet(object):
         self.max_regional_expansion = max_regional_expansion  # max rate of regional expansion
         self.save_dir = save_dir + '/' + str(slice_number)
         self.output_dir = output_dir
-        self.dataset_name = dataset_name + '/' + str(slice_number)
+        self.dataset_name = dataset_name #+ '/' + str(slice_number)
         self.regressors = []
         self.rescales = []
         self.allMask = []
@@ -90,8 +89,8 @@ class DaniNet(object):
                 self.default_weight = [100, 0.005, 0.05, 2.5, 2.5]
                 self.minimum_input_similarity = 0.3 * 10 ** -13
             elif self.attention_loss_function == 2:
-                self.default_weight = [70, 0.01, 0.1, 5, 5]
-                self.minimum_input_similarity = 0.3 * 10 ** -13
+                self.default_weight = [40, 0.0005, 0.003, 1.5, 1.1]
+                self.minimum_input_similarity = 0.3 * 10 ** -15
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
@@ -267,7 +266,7 @@ class DaniNet(object):
               ):
 
         current_weights = self.default_weight
-        file_names = glob(os.path.join('./data', self.dataset_name, '*.png'))
+        file_names = glob(os.path.join('./data', self.dataset_name, str(self.slice_number), '*.png'))
         size_data = len(file_names)
         np.random.seed(seed=2017)
         if enable_shuffle:
@@ -353,7 +352,15 @@ class DaniNet(object):
         batch_label_age_index = []
         batch_label_diagnosis = []
         batch_z_prior = []
-        previous_number_of_epoch = self.initial_global_step / num_batches
+
+        if self.attention_loss_function==2:
+            previous_number_of_epoch=0
+            lower_bound = -2
+            upper_bound = 3
+        else:
+            previous_number_of_epoch = self.initial_global_step / num_batches
+            lower_bound = 0
+            upper_bound = 1
         for epoch in range(num_epochs):
             if enable_shuffle:
                 np.random.shuffle(file_names)
@@ -363,79 +370,81 @@ class DaniNet(object):
             for ind_batch in range(num_batches):
                 # read batch images and labels
                 batch_files = file_names[ind_batch * self.size_batch:(ind_batch + 1) * self.size_batch]
-                batch = [load_image(
-                    image_path=batch_file,
-                    image_size=self.size_image,
-                    image_value_range=self.image_value_range,
-                    is_gray=(self.num_input_channels == 1),
-                ) for batch_file in batch_files]
-                if self.num_input_channels == 1:
-                    batch_images = np.array(batch).astype(np.float32)[:, :, :, None]
-                else:
-                    batch_images = np.array(batch).astype(np.float32)
+                for smooth_3d in range(lower_bound, upper_bound):
 
-                batch_label_age = np.ones(
-                    shape=(len(batch_files), self.num_progression_points),
-                    dtype=np.float
-                ) * self.image_value_range[0]
-                batch_fuzzy_membership = np.ones(
-                    shape=(len(batch_files), self.num_progression_points),
-                    dtype=np.float
-                ) * 0
-                batch_label_age_index = np.ones(
-                    shape=(len(batch_files)),
-                    dtype=np.int
-                ) * self.image_value_range[0]
+                    batch = [load_image(
+                        image_path='./data/'+ self.dataset_name +'/' +str(self.slice_number + smooth_3d)+'/'+ os.path.basename(batch_file),
+                        image_size=self.size_image,
+                        image_value_range=self.image_value_range,
+                        is_gray=(self.num_input_channels == 1),
+                    ) for batch_file in batch_files]
+                    if self.num_input_channels == 1:
+                        batch_images = np.array(batch).astype(np.float32)[:, :, :, None]
+                    else:
+                        batch_images = np.array(batch).astype(np.float32)
 
-                batch_label_diagnosis = np.ones(
-                    shape=(len(batch_files), self.n_of_diagnosis),
-                    dtype=np.float
-                ) * self.image_value_range[0]
-                for i, label in enumerate(batch_files):
-                    real_age = float(str(batch_files[i]).split('/')[-1].split('_')[0])
-                    age_index = np.min([np.max([np.digitize(real_age, self.age_intervals) - 1, 0]), 9])
+                    batch_label_age = np.ones(
+                        shape=(len(batch_files), self.num_progression_points),
+                        dtype=np.float
+                    ) * self.image_value_range[0]
+                    batch_fuzzy_membership = np.ones(
+                        shape=(len(batch_files), self.num_progression_points),
+                        dtype=np.float
+                    ) * 0
+                    batch_label_age_index = np.ones(
+                        shape=(len(batch_files)),
+                        dtype=np.int
+                    ) * self.image_value_range[0]
 
-                    batch_label_age_index[i] = age_index
-                    batch_label_age[i, age_index] = self.image_value_range[-1]
+                    batch_label_diagnosis = np.ones(
+                        shape=(len(batch_files), self.n_of_diagnosis),
+                        dtype=np.float
+                    ) * self.image_value_range[0]
+                    for i, label in enumerate(batch_files):
+                        real_age = float(str(batch_files[i]).split('/')[-1].split('_')[0])
+                        age_index = np.min([np.max([np.digitize(real_age, self.age_intervals) - 1, 0]), 9])
 
-                    # curr_gender = int(str(batch_files[i]).split('/')[-1].split('_')[1])
-                    for t in range(self.num_progression_points):
-                        if self.V2_enabled:
-                            batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
-                                                                                      np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
+                        batch_label_age_index[i] = age_index
+                        batch_label_age[i, age_index] = self.image_value_range[-1]
+
+                        # curr_gender = int(str(batch_files[i]).split('/')[-1].split('_')[1])
+                        for t in range(self.num_progression_points):
+                            if self.V2_enabled:
+                                batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
+                                                                                          np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
+                            else:
+                                batch_fuzzy_membership[i, age_index] = self.image_value_range[-1]
+                        if not use_init_model:
+                            curr_diagnosis = random.randint(0, max(self.map_disease))
                         else:
-                            batch_fuzzy_membership[i, age_index] = self.image_value_range[-1]
-                    if not use_init_model:
-                        curr_diagnosis = random.randint(0, max(self.map_disease))
-                    else:
-                        curr_diagnosis = self.map_disease[int(str(batch_files[i]).split('/')[-1].split('_')[2]) - 1]
-                    if conditioned_enabled:
-                        batch_label_diagnosis[i, curr_diagnosis] = self.image_value_range[-1]
-                    else:
-                        batch_label_diagnosis[i, 0] = self.image_value_range[-1]
+                            curr_diagnosis = self.map_disease[int(str(batch_files[i]).split('/')[-1].split('_')[2]) - 1]
+                        if conditioned_enabled:
+                            batch_label_diagnosis[i, curr_diagnosis] = self.image_value_range[-1]
+                        else:
+                            batch_label_diagnosis[i, 0] = self.image_value_range[-1]
 
-                # prior distribution on the prior of z
-                batch_z_prior = np.random.uniform(
-                    self.image_value_range[0],
-                    self.image_value_range[-1],
-                    [self.size_batch, self.num_z_channels]
-                ).astype(np.float32)
+                    # prior distribution on the prior of z
+                    batch_z_prior = np.random.uniform(
+                        self.image_value_range[0],
+                        self.image_value_range[-1],
+                        [self.size_batch, self.num_z_channels]
+                    ).astype(np.float32)
 
-                _, _, _ = self.session.run(
-                    fetches=[
-                        self.EG_optimizer,
-                        self.D_z_optimizer,
-                        self.D_img_optimizer
-                    ],
-                    feed_dict={
-                        self.input_image: batch_images,
-                        self.age: batch_label_age,
-                        self.age_index: batch_label_age_index,
-                        self.fuzzy_membership: batch_fuzzy_membership,
-                        self.diagnosis: batch_label_diagnosis,
-                        self.z_prior: batch_z_prior
-                    }
-                )
+                    _, _, _ = self.session.run(
+                        fetches=[
+                            self.EG_optimizer,
+                            self.D_z_optimizer,
+                            self.D_img_optimizer
+                        ],
+                        feed_dict={
+                            self.input_image: batch_images,
+                            self.age: batch_label_age,
+                            self.age_index: batch_label_age_index,
+                            self.fuzzy_membership: batch_fuzzy_membership,
+                            self.diagnosis: batch_label_diagnosis,
+                            self.z_prior: batch_z_prior
+                        }
+                    )
             # add to summary
             summary = self.summary.eval(
                 feed_dict={
@@ -729,7 +738,6 @@ class DaniNet(object):
                 self.age: query_labels,
                 self.diagnosis: query_diagnosis
             })
-
         save_batch_images(
             batch_images=query_images,
             save_path=os.path.join(test_dir, 'input.png'),
@@ -862,7 +870,13 @@ class DaniNet(object):
             print("\tSUCCESS ^_^")
 
         num_samples = int(np.sqrt(self.size_batch))
-        for smooth_3d in range(-2, 3):
+        if self.attention_loss_function==2:
+            lower_bound = -2
+            upper_bound = 3
+        else:
+            lower_bound = -2
+            upper_bound = 3
+        for smooth_3d in range(lower_bound, upper_bound):
             file_names = glob(testing_samples_dir + str(current_slice + smooth_3d) + '/*png')
             if len(file_names) < num_samples:
                 print('The number of testing images is must larger than ', num_samples)

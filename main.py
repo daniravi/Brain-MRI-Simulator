@@ -83,7 +83,7 @@ def main(_):
     attention_loss_function = False
     V2_enabled = False  # fuzzy + logistic regressor
     test_label = ''
-
+    num_epochs_transfer_learning = 1500
     if FLAGS.conf == 0:
         conditioned_enabled = False
         progression_enabled = False
@@ -125,7 +125,6 @@ def main(_):
     #                 'Late mild cognitive impairment', 'Alzheimer''s disease'};
     FLAGS.savedir = FLAGS.savedir + test_label
     max_regional_expansion = 10
-    num_epochs_transfer_learning = 500
     map_disease = (0, 1, 2, 2, 2, 3)
     age_intervals = (63, 66.4, 69.1, 71, 72.4, 74, 75.6, 77.4, 79.4, 81.7, 87)
 
@@ -189,7 +188,8 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
     pprint.pprint(FLAGS)
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
-    attention_loss_function= 2
+    if attention_loss_function == 1:
+        attention_loss_function = 2
     with tf.Session(config=config) as session:
         model = DaniNet(
             session,  # TensorFlow session
