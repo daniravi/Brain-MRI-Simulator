@@ -11,6 +11,7 @@ from GUI import GUI
 from datetime import datetime
 import MRI_assembler as MRI_assembler
 import re
+import glob as glob
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 environ['FSLOUTPUTTYPE'] = 'NIFTI'
@@ -27,7 +28,7 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--conf', type=int, default=1)
-parser.add_argument('--phase', type=int, default=3)
+parser.add_argument('--phase', type=int, default=5)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -141,7 +142,7 @@ def main(_):
     if FLAGS.phase == 3:
         test_label = 'sample_Test_after_TL'
         outputFolder = 'SyntheticMRI_V1'
-        type_of_assembly = 0  # 0: input image; 1: 3d spatial-consistency
+        type_of_assembly = 0  # 0: input image; 1: 3d spatial-consistency #2 No 3d
         if type_of_assembly == 0:
             outputFolder = 'InputMRI'
         if not os.path.exists(outputFolder):
@@ -153,7 +154,7 @@ def main(_):
     if FLAGS.phase == 5:
         # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
         fsl_bin_dir = '/usr/local/fsl'
-        extract_volumes('ADNI_100_S_0015_MR_MPR-R____N3_Br_20061213151820274_S13884_I33040.nii', fsl_bin_dir)
+        extract_volumes('./InputMRI/', fsl_bin_dir, './FLS_Input_MRI/')
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):
@@ -218,36 +219,49 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
     tf.reset_default_graph()
 
 
-def extract_volumes(input_file, fsl_bin_dir):
+def extract_volumes(input_folder, fsl_bin_dir, FSL_output):
+    # Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
     environ['PATH'] = environ['PATH'] + ':' + fsl_bin_dir + '/bin'
     environ['FSLDIR'] = fsl_bin_dir
+    os.system('mkdir ' + FSL_output)
+    for input_file in glob.glob(input_folder + "*.nii*"):
+        input_fileNew = os.path.basename(input_file)[:-15]
+        print(input_fileNew)
+        os.system('mkdir ' + FSL_output + input_fileNew)
+        os.system('cp ' + input_file + ' ' + FSL_output + input_fileNew + '/input.nii.gz')
 
-    start_time = datetime.now()
-    os.system('mkdir FSL_file')
-    os.system('cp ' + input_file + ' ./FSL_file/input.nii')
-    # Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
-    os.system('run_first_all -i ./FSL_file/input.nii -b -s L_Hipp,R_Hipp -o ./FSL_file/regions')
-    time_elapsed = datetime.now() - start_time
-    print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+        input_file = input_fileNew
+        Vol = np.zeros(7)
 
-    start_time = datetime.now()
-    os.system('fslstats ./FSL_file/regions_all_fast_firstseg.nii -h 64 > ./FSL_file/region_volume.txt')
-    text_file = open("./FSL_file/region_volume.txt", "r")
-    lines = text_file.readlines()
-    text_file.close()
-    Vol = []
-    for i in [20, 63]:
-        Vol = np.append(Vol, np.float32(lines[i]))
-    os.system('sienax ./FSL_file/input.nii -o ./FSL_file/tissue -r')
-    time_elapsed = datetime.now() - start_time
-    print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+        #os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s L_Hipp -o ' + FSL_output + input_file + '/regions')
+        if os.path.exists('' + FSL_output + input_file + '/regions-L_Hipp_first.nii'):
+            os.system(
+                'fslstats ' + FSL_output + input_file + '/regions-L_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume1.txt')
+            text_file = open('' + FSL_output + input_file + '/region_volume1.txt', "r")
+            lines = text_file.readlines()
+            text_file.close()
+            Vol[0] = np.float32(lines[20])
 
-    text_file = open("./FSL_file/tissue/report.sienax", "r")
-    lines = text_file.readlines()
-    text_file.close()
-    for i in range(np.size(lines) - 5, np.size(lines)):
-        Vol = np.append(Vol, re.findall('\d+\.\d+', lines[i])[0])
-    print(Vol)
+        #os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s R_Hipp -o ' + FSL_output + input_file + '/regions')
+        if os.path.exists('' + FSL_output + input_file + '/regions-R_Hipp_first.nii'):
+            os.system(
+                'fslstats ' + FSL_output + input_file + '/regions-R_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume2.txt')
+            text_file = open('' + FSL_output + input_file + '/region_volume2.txt', "r")
+            lines = text_file.readlines()
+            text_file.close()
+            Vol[1] = np.float32(lines[63])
+
+        os.system('./sienax_mod ' + FSL_output + input_file + '/input.nii.gz -o ' + FSL_output + input_file + '/tissue -r')
+
+        text_file = open('' + FSL_output + input_file + '/tissue/report.sienax', "r")
+        lines = text_file.readlines()
+        text_file.close()
+        t = 2
+        for i in range(np.size(lines) - 5, np.size(lines)):
+            Vol[t] = np.float32(re.findall('\d+\.\d+', lines[i])[0])
+            t = t + 1
+        np.set_printoptions(precision=5,suppress=True)
+        print(Vol)
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
