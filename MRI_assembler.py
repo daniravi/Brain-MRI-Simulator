@@ -24,22 +24,22 @@ def generate_MRI_slice_average_5(curr_slice, folder, fileName, FLAGS):
     a[2, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
     a[3, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
     a[4, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
-    return a[0, :, :] * 0.05 + a[1, :, :] * 0.15 + a[2, :, :] * 0.6 + a[3, :, :] * 0.15 + a[4, :, :] * 0.05
+    return a[0, :, :] * 0.1 + a[1, :, :] * 0.15 + a[2, :, :] * 0.25 + a[3, :, :] * 0.15 + a[4, :, :] * 0.1
 
 
 def assembly_MRI(fileName, folder, age_to_generate, age_intervals, outputFolder, type_of_assembly, FLAGS):
     curr_slice = 44
-    numb_Slice = 97
+    numb_Slice = 95
     print(fileName)
     final_MRI = np.ones((numb_Slice, 128, 128), dtype=np.int16)
     for i in range(0, numb_Slice):
         if type_of_assembly == 0:
             final_MRI[i, :, :] = imread('./data/' + FLAGS.datasetTL + '/' + str(curr_slice) + '/' + fileName)
         elif type_of_assembly == 1:
-            progression_MRI = generate_MRI_slice_average_5(curr_slice, folder, fileName, FLAGS)
+            progression_MRI = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
             final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
         elif type_of_assembly == 2:
-            progression_MRI = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+            progression_MRI = generate_MRI_slice_average_5(curr_slice, folder, fileName, FLAGS)
             final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
         curr_slice = curr_slice + 1
 

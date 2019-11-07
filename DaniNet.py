@@ -89,8 +89,8 @@ class DaniNet(object):
                 self.default_weight = [100, 0.005, 0.05, 2.5, 2.5]
                 self.minimum_input_similarity = 0.3 * 10 ** -13
             elif self.attention_loss_function == 2:
-                self.default_weight = [40, 0.0005, 0.003, 1.5, 1.1]
-                self.minimum_input_similarity = 0.3 * 10 ** -15
+                self.default_weight = [35, 0.0005, 0.003, 1.5, 1.5]
+                self.minimum_input_similarity = 0.3 * 10 ** -14
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0

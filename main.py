@@ -101,6 +101,7 @@ def main(_):
         test_label = '_DaniNet-V2'
         print('Select DaniNet-V2 configuration')
     elif FLAGS.conf == 3:
+        num_epochs_transfer_learning=600
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = True
@@ -141,8 +142,17 @@ def main(_):
                 map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 3:
         test_label = 'sample_Test_after_TL'
-        outputFolder = 'SyntheticMRI_V1'
-        type_of_assembly = 0  # 0: input image; 1: 3d spatial-consistency #2 No 3d
+        type_of_assembly = 0
+        if FLAGS.conf == 1:
+            outputFolder = 'SyntheticMRI_V1'
+            type_of_assembly = 1  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
+        elif FLAGS.conf == 2:
+            outputFolder = 'SyntheticMRI_V2'
+            type_of_assembly = 1  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
+        elif FLAGS.conf == 3:
+            outputFolder = 'SyntheticMRI_V2_AL'
+            type_of_assembly = 2  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
+
         if type_of_assembly == 0:
             outputFolder = 'InputMRI'
         if not os.path.exists(outputFolder):
@@ -232,17 +242,17 @@ def extract_volumes(input_folder, fsl_bin_dir, FSL_output):
 
         input_file = input_fileNew
         Vol = np.zeros(7)
-
-        #os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s L_Hipp -o ' + FSL_output + input_file + '/regions')
+        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+            os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s L_Hipp -o ' + FSL_output + input_file + '/regions')
         if os.path.exists('' + FSL_output + input_file + '/regions-L_Hipp_first.nii'):
             os.system(
                 'fslstats ' + FSL_output + input_file + '/regions-L_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume1.txt')
             text_file = open('' + FSL_output + input_file + '/region_volume1.txt', "r")
             lines = text_file.readlines()
             text_file.close()
-            Vol[0] = np.float32(lines[20])
-
-        #os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s R_Hipp -o ' + FSL_output + input_file + '/regions')
+            Vol[0] = np.float32(lines[63])
+        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+            os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s R_Hipp -o ' + FSL_output + input_file + '/regions')
         if os.path.exists('' + FSL_output + input_file + '/regions-R_Hipp_first.nii'):
             os.system(
                 'fslstats ' + FSL_output + input_file + '/regions-R_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume2.txt')
@@ -250,9 +260,8 @@ def extract_volumes(input_folder, fsl_bin_dir, FSL_output):
             lines = text_file.readlines()
             text_file.close()
             Vol[1] = np.float32(lines[63])
-
-        os.system('./sienax_mod ' + FSL_output + input_file + '/input.nii.gz -o ' + FSL_output + input_file + '/tissue -r')
-
+        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+            os.system('./sienax_mod ' + FSL_output + input_file + '/input.nii.gz -o ' + FSL_output + input_file + '/tissue -r')
         text_file = open('' + FSL_output + input_file + '/tissue/report.sienax', "r")
         lines = text_file.readlines()
         text_file.close()
@@ -260,7 +269,7 @@ def extract_volumes(input_folder, fsl_bin_dir, FSL_output):
         for i in range(np.size(lines) - 5, np.size(lines)):
             Vol[t] = np.float32(re.findall('\d+\.\d+', lines[i])[0])
             t = t + 1
-        np.set_printoptions(precision=5,suppress=True)
+        np.set_printoptions(precision=5, suppress=True)
         print(Vol)
 
 
