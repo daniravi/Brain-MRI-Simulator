@@ -38,8 +38,11 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals, outputFolder,
         elif type_of_assembly == 1:
             progression_MRI = generate_MRI_slice_average_5(curr_slice, folder, fileName, FLAGS)
             final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
-
+        elif type_of_assembly == 2:
+            progression_MRI = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+            final_MRI[i, :, :] = np.int16(generate_MRI_slice(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
         curr_slice = curr_slice + 1
+
     transformationMatrix = [[0, -1, 0, 0],
                             [0, 0, 1, 0],
                             [1, 0, 0, 0],
@@ -47,7 +50,6 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals, outputFolder,
 
     img = nib.Nifti1Image(final_MRI, transformationMatrix)
     nib.save(img, outputFolder + '/' + fileName + '.nii.gz')
-
 
 def assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS):
     assembly_MRI('79.063_1_2_1_ADNI_006_S_5153_MR_MT1__N3m_Br_20130429150511942_S187543_I369218.nii.png', test_label, 81.3726, age_intervals, outputFolder,
