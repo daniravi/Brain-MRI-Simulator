@@ -27,8 +27,8 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=1)
-parser.add_argument('--phase', type=int, default=5)
+parser.add_argument('--conf', type=int, default=3)
+parser.add_argument('--phase', type=int, default=2)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -85,21 +85,21 @@ def main(_):
         attention_loss_function = False
         V2_enabled = False
         test_label = '_baseline'
-        print('Select baseline configuration')
+        print('Selected baseline configuration')
     elif FLAGS.conf == 1:
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = False
         V2_enabled = False
         test_label = '_DaniNet-V1'
-        print('Select DaniNet-V1 configuration')
+        print('Selected DaniNet-V1 configuration')
     elif FLAGS.conf == 2:
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = False
         V2_enabled = True
         test_label = '_DaniNet-V2'
-        print('Select DaniNet-V2 configuration')
+        print('Selected DaniNet-V2 configuration')
     elif FLAGS.conf == 3:
         num_epochs_transfer_learning=600
         conditioned_enabled = True
@@ -108,6 +108,8 @@ def main(_):
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2_AL'
         print('Select DaniNet-V2_AL configuration')
+    elif FLAGS.conf == -1:
+        print('Selected assembly input modality')
     else:
         print('Please select one of the available modality.')
         exit()
@@ -152,19 +154,26 @@ def main(_):
         elif FLAGS.conf == 3:
             outputFolder = 'SyntheticMRI_V2_AL'
             type_of_assembly = 2  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
-
-        if type_of_assembly == 0:
+        elif FLAGS.conf == -1:
             outputFolder = 'InputMRI'
+            type_of_assembly = 0
         if not os.path.exists(outputFolder):
             os.mkdir(outputFolder)
         MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
-
     if FLAGS.phase == 4:
-        GUI()
-    if FLAGS.phase == 5:
         # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
         fsl_bin_dir = '/usr/local/fsl'
-        extract_volumes('./InputMRI/', fsl_bin_dir, './FLS_Input_MRI/')
+        if FLAGS.conf == -1:
+            extract_volumes('./InputMRI/', fsl_bin_dir, './FLS_Input_MRI/')
+        elif FLAGS.conf == 1:
+            extract_volumes('./SyntheticMRI_V1/', fsl_bin_dir, './FLS_SyntheticMRI_V1/')
+        elif FLAGS.conf == 2:
+            extract_volumes('./SyntheticMRI_V2/', fsl_bin_dir, './FLS_SyntheticMRI_V2/')
+        elif FLAGS.conf == 3:
+            extract_volumes('./SyntheticMRI_V2_AL/', fsl_bin_dir, './FLS_SyntheticMRI_V2_AL/')
+
+    if FLAGS.phase == 5:
+        GUI()
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):

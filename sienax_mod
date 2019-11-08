@@ -180,7 +180,7 @@ echo "----------  extract brain  --------------------------------------------" >
 #${FSLDIR}/bin/bet $I ${I}_brain -s -m $betopts >> report.sienax
 cp I.nii I_brain.nii
 
-${FSLDIR}/bin/fslmaths ${I}_brain -thr `$FSLDIR/bin/fslstats ${I}_brain -P 5` -bin ${I}_brain_mask
+${FSLDIR}/bin/fslmaths ${I}_brain -thr `$FSLDIR/bin/fslstats ${I}_brain -P 0` -bin ${I}_brain_mask
 
 ${FSLDIR}/bin/fslmaths ${I}_brain -sub `$FSLDIR/bin/fslstats ${I}_brain -p 0` -mas ${I}_brain_mask ${I}_brain -odt float
 #${FSLDIR}/bin/overlay 0 0 $I -a ${I}_brain 1 `${FSLDIR}/bin/fslstats ${I}_brain -P 95` ${I}_brain_skull 0.9 1.1 ${I}_grot
