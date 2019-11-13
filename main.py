@@ -7,11 +7,12 @@ from progression_net import progression_net
 import pickle
 import pprint
 import numpy as np
-from GUI import GUI
-from datetime import datetime
+
+#from GUI import GUI
 import MRI_assembler as MRI_assembler
 import re
 import glob as glob
+from joblib import Parallel, delayed
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 environ['FSLOUTPUTTYPE'] = 'NIFTI'
@@ -27,8 +28,8 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=3)
-parser.add_argument('--phase', type=int, default=2)
+parser.add_argument('--conf', type=int, default=6)
+parser.add_argument('--phase', type=int, default=4)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -78,7 +79,9 @@ def main(_):
     attention_loss_function = False
     V2_enabled = False  # fuzzy + logistic regressor
     test_label = ''
+    outputFolder = ''
     num_epochs_transfer_learning = 1500
+    type_of_assembly = 0  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
     if FLAGS.conf == 0:
         conditioned_enabled = False
         progression_enabled = False
@@ -92,6 +95,8 @@ def main(_):
         attention_loss_function = False
         V2_enabled = False
         test_label = '_DaniNet-V1'
+        outputFolder = 'SyntheticMRI_V1'
+        type_of_assembly = 1
         print('Selected DaniNet-V1 configuration')
     elif FLAGS.conf == 2:
         conditioned_enabled = True
@@ -99,20 +104,63 @@ def main(_):
         attention_loss_function = False
         V2_enabled = True
         test_label = '_DaniNet-V2'
+        outputFolder = 'SyntheticMRI_V2'
+        type_of_assembly = 1
         print('Selected DaniNet-V2 configuration')
     elif FLAGS.conf == 3:
-        num_epochs_transfer_learning=600
+        num_epochs_transfer_learning = 600
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = True
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2_AL'
+        outputFolder = 'SyntheticMRI_V2_AL'
+        type_of_assembly = 2
+        print('Select DaniNet-V2_AL configuration')
+    elif FLAGS.conf == 4:
+        num_epochs_transfer_learning = 600
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = False
+        V2_enabled = True  # fuzzy + logistic regressor
+        outputFolder = 'SyntheticMRI_V1_NO_PWF'
+        type_of_assembly = 2
+        test_label = '_DaniNet-V1'
+        print('Select DaniNet-V1_AL_no_PWF configuration')
+    elif FLAGS.conf == 5:
+        num_epochs_transfer_learning = 600
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = False
+        V2_enabled = True  # fuzzy + logistic regressor
+        test_label = '_DaniNet-V2'
+        outputFolder = 'SyntheticMRI_V2_NO_PWF'
+        type_of_assembly = 2
+        print('Select DaniNet-V2_AL_no_PWF configuration')
+    elif FLAGS.conf == 6:
+        num_epochs_transfer_learning = 600
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = True
+        V2_enabled = True  # fuzzy + logistic regressor
+        test_label = '_DaniNet-V2_AL'
+        outputFolder = 'SyntheticMRI_V2_LA_noSpatial'
+        type_of_assembly = 1
         print('Select DaniNet-V2_AL configuration')
     elif FLAGS.conf == -1:
+        outputFolder = 'SyntheticRealFollowUp'
+        type_of_assembly = 0
         print('Selected assembly input modality')
+    elif FLAGS.conf == -2:
+        outputFolder = 'SyntheticProgressionMRI'
+        FLAGS.savedir = 'save_DaniNet-V2_AL'
+        print('Selected assembly progression modality')
     else:
         print('Please select one of the available modality.')
         exit()
+
+    if not os.path.exists(outputFolder):
+        os.mkdir(outputFolder)
 
     if V2_enabled:
         regressor_type = 1  # 1 logistic regressor
@@ -144,37 +192,65 @@ def main(_):
                 map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 3:
         test_label = 'sample_Test_after_TL'
-        type_of_assembly = 0
-        if FLAGS.conf == 1:
-            outputFolder = 'SyntheticMRI_V1'
-            type_of_assembly = 1  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
-        elif FLAGS.conf == 2:
-            outputFolder = 'SyntheticMRI_V2'
-            type_of_assembly = 1  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
-        elif FLAGS.conf == 3:
-            outputFolder = 'SyntheticMRI_V2_AL'
-            type_of_assembly = 2  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
-        elif FLAGS.conf == -1:
-            outputFolder = 'InputMRI'
-            type_of_assembly = 0
-        if not os.path.exists(outputFolder):
-            os.mkdir(outputFolder)
-        MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
+        if FLAGS.conf == -2:
+            MRI_assembler.assemblyAll_progression(test_label, age_intervals, outputFolder, FLAGS)
+        else:
+            MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
     if FLAGS.phase == 4:
-        # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
-        fsl_bin_dir = '/usr/local/fsl'
-        if FLAGS.conf == -1:
-            extract_volumes('./InputMRI/', fsl_bin_dir, './FLS_Input_MRI/')
-        elif FLAGS.conf == 1:
-            extract_volumes('./SyntheticMRI_V1/', fsl_bin_dir, './FLS_SyntheticMRI_V1/')
-        elif FLAGS.conf == 2:
-            extract_volumes('./SyntheticMRI_V2/', fsl_bin_dir, './FLS_SyntheticMRI_V2/')
-        elif FLAGS.conf == 3:
-            extract_volumes('./SyntheticMRI_V2_AL/', fsl_bin_dir, './FLS_SyntheticMRI_V2_AL/')
+        evaluation(outputFolder)
 
-    if FLAGS.phase == 5:
-        GUI()
 
+def get_follow_up_age(fileName, quaries_for_progression):
+    for i in range(np.size(quaries_for_progression)):
+        if os.path.basename(fileName)[:-7] == quaries_for_progression[i][0]:
+            return i
+    else:
+        return -1
+
+def evaluation(outputFolder):
+    # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
+    number_of_considered_brain_regions = 7
+    number_of_parallel_jobs = 12
+    fsl_bin_dir = '/usr/local/fsl'
+    environ['PATH'] = environ['PATH'] + ':' + fsl_bin_dir + '/bin'
+    environ['FSLDIR'] = fsl_bin_dir
+
+    input_files = glob.glob('./SyntheticRealFollowUp/' + "*.nii*")
+    if not os.path.exists('./FLS_RealFollowUp_MRI/'):
+        os.system('mkdir ./FLS_RealFollowUp_MRI/')
+    #Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)('./FLS_RealFollowUp_MRI/', i) for i in input_files)
+    result = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+    for i, file in enumerate(input_files):
+        result[i, :] = (extract_volumes('./FLS_RealFollowUp_MRI/', file))
+
+    input_files = glob.glob('./SyntheticInputMRI/' + "*.nii*")
+    if not os.path.exists('./FLS_Input_MRI/'):
+        os.system('mkdir ./FLS_Input_MRI/')
+    # Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)('./FLS_RealFollowUp_MRI/', i) for i in input_files)
+    result_input = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+    for i, file in enumerate(input_files):
+        result_input[i, :] = (extract_volumes('./FLS_Input_MRI/', file))
+
+
+    input_files = glob.glob('./' + outputFolder + '/' + "*.nii*")
+    if not os.path.exists('./FLS_' + outputFolder + '/'):
+        os.system('mkdir ./FLS_' + outputFolder + '/')
+    #Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)('./FLS_' + outputFolder + '/', i) for i in input_files)
+    result2 = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+    for i, file in enumerate(input_files):
+        result2[i, :] = (extract_volumes('./FLS_' + outputFolder + '/', file))
+
+    totErr = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+    for j in range(number_of_considered_brain_regions):
+        curr_index = 0
+        for i in range(np.size(input_files)):
+            if not (result[i, j] == 0) and not (result2[i, j] == 0):
+                positionInlist = get_follow_up_age(input_files[i], MRI_assembler.quaries_for_progression)
+                #normalization_by_age = float(MRI_assembler.quaries_for_progression[positionInlist][1]) - float(
+                #    MRI_assembler.quaries_for_progression[positionInlist][0].split('_')[0])
+                totErr[curr_index, j] = abs((result[i, j]/result_input[i, j] - result2[i, j]/result_input[i, j])) #* normalization_by_age
+                curr_index = curr_index + 1
+        print("{0:.3f}".format(np.mean(totErr[:curr_index - 1, j]))+'$\pm$'+"{0:.3f}".format(np.var(totErr[:curr_index - 1, j])) +'&')
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):
     pprint.pprint(FLAGS)
@@ -238,48 +314,45 @@ def transfer_learning(curr_slice, conditioned_enabled, progression_enabled, atte
     tf.reset_default_graph()
 
 
-def extract_volumes(input_folder, fsl_bin_dir, FSL_output):
+def extract_volumes(FSL_output, input_file):
     # Vol_name=['L_hippocampus','R_hippocampus','Peripheral_grey','Ventricular_csf','Grey','White','Brain']
-    environ['PATH'] = environ['PATH'] + ':' + fsl_bin_dir + '/bin'
-    environ['FSLDIR'] = fsl_bin_dir
-    os.system('mkdir ' + FSL_output)
-    for input_file in glob.glob(input_folder + "*.nii*"):
-        input_fileNew = os.path.basename(input_file)[:-15]
-        print(input_fileNew)
+    number_of_considered_brain_regions =7
+    input_fileNew = os.path.basename(input_file)[:-15]
+    print(input_fileNew)
+    if not os.path.exists(FSL_output + input_fileNew):
         os.system('mkdir ' + FSL_output + input_fileNew)
-        os.system('cp ' + input_file + ' ' + FSL_output + input_fileNew + '/input.nii.gz')
+    os.system('cp ' + input_file + ' ' + FSL_output + input_fileNew + '/input.nii.gz')
 
-        input_file = input_fileNew
-        Vol = np.zeros(7)
-        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
-            os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s L_Hipp -o ' + FSL_output + input_file + '/regions')
-        if os.path.exists('' + FSL_output + input_file + '/regions-L_Hipp_first.nii'):
-            os.system(
-                'fslstats ' + FSL_output + input_file + '/regions-L_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume1.txt')
-            text_file = open('' + FSL_output + input_file + '/region_volume1.txt', "r")
-            lines = text_file.readlines()
-            text_file.close()
-            Vol[0] = np.float32(lines[63])
-        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
-            os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s R_Hipp -o ' + FSL_output + input_file + '/regions')
-        if os.path.exists('' + FSL_output + input_file + '/regions-R_Hipp_first.nii'):
-            os.system(
-                'fslstats ' + FSL_output + input_file + '/regions-R_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume2.txt')
-            text_file = open('' + FSL_output + input_file + '/region_volume2.txt', "r")
-            lines = text_file.readlines()
-            text_file.close()
-            Vol[1] = np.float32(lines[63])
-        if not os.path.exists('' + FSL_output + input_file + '/tissue'):
-            os.system('./sienax_mod ' + FSL_output + input_file + '/input.nii.gz -o ' + FSL_output + input_file + '/tissue -r')
-        text_file = open('' + FSL_output + input_file + '/tissue/report.sienax', "r")
+    input_file = input_fileNew
+    Vol = np.zeros(number_of_considered_brain_regions)
+    if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+        os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s L_Hipp -o ' + FSL_output + input_file + '/regions')
+    if os.path.exists('' + FSL_output + input_file + '/regions-L_Hipp_first.nii'):
+        os.system(
+            'fslstats ' + FSL_output + input_file + '/regions-L_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume1.txt')
+        text_file = open('' + FSL_output + input_file + '/region_volume1.txt', "r")
         lines = text_file.readlines()
         text_file.close()
-        t = 2
-        for i in range(np.size(lines) - 5, np.size(lines)):
-            Vol[t] = np.float32(re.findall('\d+\.\d+', lines[i])[0])
-            t = t + 1
-        np.set_printoptions(precision=5, suppress=True)
-        print(Vol)
+        Vol[0] = np.float32(lines[63])
+    if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+        os.system('run_first_all -i ' + FSL_output + input_file + '/input.nii.gz -b -s R_Hipp -o ' + FSL_output + input_file + '/regions')
+    if os.path.exists('' + FSL_output + input_file + '/regions-R_Hipp_first.nii'):
+        os.system(
+            'fslstats ' + FSL_output + input_file + '/regions-R_Hipp_first.nii -h 64 > ' + FSL_output + input_file + '/region_volume2.txt')
+        text_file = open('' + FSL_output + input_file + '/region_volume2.txt', "r")
+        lines = text_file.readlines()
+        text_file.close()
+        Vol[1] = np.float32(lines[63])
+    if not os.path.exists('' + FSL_output + input_file + '/tissue'):
+        os.system('./sienax_mod ' + FSL_output + input_file + '/input.nii.gz -o ' + FSL_output + input_file + '/tissue -r')
+    text_file = open('' + FSL_output + input_file + '/tissue/report.sienax', "r")
+    lines = text_file.readlines()
+    text_file.close()
+    t = 2
+    for i in range(np.size(lines) - 5, np.size(lines)):
+        Vol[t] = float(re.findall('\d+\.\d+', lines[i])[0])
+        t = t + 1
+    return Vol#/Vol[6]*100
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
