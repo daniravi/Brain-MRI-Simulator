@@ -26,8 +26,8 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=7)
-parser.add_argument('--phase', type=int, default=4)
+parser.add_argument('--conf', type=int, default=3)
+parser.add_argument('--phase', type=int, default=1)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -106,7 +106,7 @@ def main(_):
         type_of_assembly = 1
         print('Selected DaniNet-V2 configuration')
     elif FLAGS.conf == 3:
-        num_epochs_transfer_learning = 600
+        num_epochs_transfer_learning = 1500
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = True
@@ -116,7 +116,7 @@ def main(_):
         type_of_assembly = 2
         print('Select DaniNet-V2_AL configuration')
     elif FLAGS.conf == 4:
-        num_epochs_transfer_learning = 600
+        num_epochs_transfer_learning = 1500
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = False
@@ -162,7 +162,7 @@ def main(_):
         print('Selected assembly input modality')
     elif FLAGS.conf == -2:
         outputFolder = 'SyntheticProgressionMRI'
-        FLAGS.savedir = 'save_DaniNet-V2_AL'
+        test_label = '_DaniNet-V2_AL'
         print('Selected assembly progression modality')
     else:
         print('Please select one of the available modality.')
@@ -181,7 +181,7 @@ def main(_):
     FLAGS.savedir = FLAGS.savedir + test_label
     max_regional_expansion = 10
     map_disease = (0, 1, 2, 2, 2, 3)
-    age_intervals = (63, 66.4, 69.1, 71, 72.4, 74, 75.6, 77.4, 79.4, 81.7, 87)
+    age_intervals = (63, 65.5, 68, 71.5, 73, 75.5, 78, 80.5, 83, 85.5, 88)
 
     if FLAGS.phase == 0:
         train_regressors(max_regional_expansion=max_regional_expansion, map_disease=map_disease, regressor_type=regressor_type)

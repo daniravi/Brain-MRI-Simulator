@@ -9,6 +9,7 @@ import pickle
 import skfuzzy
 import random
 
+
 class DaniNet(object):
     def __init__(self,
                  session,  # TensorFlow session
@@ -56,7 +57,7 @@ class DaniNet(object):
         self.max_regional_expansion = max_regional_expansion  # max rate of regional expansion
         self.save_dir = save_dir + '/' + str(slice_number)
         self.output_dir = output_dir
-        self.dataset_name = dataset_name #+ '/' + str(slice_number)
+        self.dataset_name = dataset_name  # + '/' + str(slice_number)
         self.regressors = []
         self.rescales = []
         self.allMask = []
@@ -78,19 +79,30 @@ class DaniNet(object):
         self.n_of_diagnosis = np.size(np.unique(map_disease))
         self.regressor_type = regressor_type
         self.attention_loss_function = attention_loss_function
+        self.minimum_input_similarity = 0
+        self.is_binned = True
         if self.V2_enabled:
             if self.attention_loss_function == 1:
-                # self.default_weight = [100, 0.00045, 0.005, 0.06, 0.065]
-                # self.default_weight = [100, 0.0005, 0.005, 0.25, 0.25]
-                # self.default_weight = [100, 0.0025, 0.05, 1.25, 1.25]
-                self.default_weight = [100, 0.002, 0.05, 1.25, 1.25]
-                self.minimum_input_similarity = 0.3 * 10 ** -15
+                # attention loss during training
+                if not self.is_binned:
+                    self.default_weight = [100, 0.002, 0.05, 1.25, 1.25]
+                    self.minimum_input_similarity = 0.3 * 10 ** -15
+                else:
+                    self.default_weight = [1, 0.0008, 0.006, 0.4, 0.4]
             elif self.attention_loss_function == 0:
-                self.default_weight = [100, 0.005, 0.05, 2.5, 2.5]
-                self.minimum_input_similarity = 0.3 * 10 ** -13
+                # attention loss disabled
+                if not self.is_binned:
+                    self.default_weight = [100, 0.005, 0.05, 2.5, 2.5]
+                else:
+                    self.minimum_input_similarity = 0.3 * 10 ** -13
+                    self.default_weight = [0.6, 0.0002, 0.0006, 0.01, 0.01]
             elif self.attention_loss_function == 2:
-                self.default_weight = [35, 0.0005, 0.003, 1.5, 1.5]
-                self.minimum_input_similarity = 0.3 * 10 ** -14
+                # attention loss during transfer learning
+                if not self.is_binned:
+                    self.default_weight = [35, 0.0005, 0.003, 1.5, 1.5]
+                    self.minimum_input_similarity = 0.3 * 10 ** -14
+                else:
+                    self.default_weight = [1, 0.0005, 0.005, 0.5, 0.5]
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
@@ -353,8 +365,8 @@ class DaniNet(object):
         batch_label_diagnosis = []
         batch_z_prior = []
 
-        if self.attention_loss_function==2:
-            previous_number_of_epoch=0
+        if self.attention_loss_function == 2:
+            previous_number_of_epoch = 0
             lower_bound = -2
             upper_bound = 3
         else:
@@ -373,7 +385,7 @@ class DaniNet(object):
                 for smooth_3d in range(lower_bound, upper_bound):
 
                     batch = [load_image(
-                        image_path='./data/'+ self.dataset_name +'/' +str(self.slice_number + smooth_3d)+'/'+ os.path.basename(batch_file),
+                        image_path='./data/' + self.dataset_name + '/' + str(self.slice_number + smooth_3d) + '/' + os.path.basename(batch_file),
                         image_size=self.size_image,
                         image_value_range=self.image_value_range,
                         is_gray=(self.num_input_channels == 1),
@@ -409,11 +421,12 @@ class DaniNet(object):
 
                         # curr_gender = int(str(batch_files[i]).split('/')[-1].split('_')[1])
                         for t in range(self.num_progression_points):
-                            if self.V2_enabled:
+                            if self.V2_enabled and not self.is_binned:
                                 batch_fuzzy_membership[i, t] = skfuzzy.membership.gaussmf(real_age, self.bin_centers[t],
                                                                                           np.sqrt(self.bin_size[t]) * self.bin_variance_scale)
                             else:
                                 batch_fuzzy_membership[i, age_index] = self.image_value_range[-1]
+
                         if not use_init_model:
                             curr_diagnosis = random.randint(0, max(self.map_disease))
                         else:
@@ -870,7 +883,7 @@ class DaniNet(object):
             print("\tSUCCESS ^_^")
 
         num_samples = int(np.sqrt(self.size_batch))
-        if self.attention_loss_function==2:
+        if self.attention_loss_function == 2:
             lower_bound = -2
             upper_bound = 3
         else:
