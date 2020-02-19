@@ -33,7 +33,8 @@ class DaniNet(object):
                  age_intervals=(63, 66, 68, 70, 72, 74, 76, 78, 80, 83, 87),
                  V2_enabled=True,
                  regressor_type=1,
-                 attention_loss_function=1
+                 attention_loss_function=1,
+                 binned=False
                  ):
 
         self.session = session
@@ -80,7 +81,7 @@ class DaniNet(object):
         self.regressor_type = regressor_type
         self.attention_loss_function = attention_loss_function
         self.minimum_input_similarity = 0
-        self.is_binned = True
+        self.is_binned = binned
         if self.V2_enabled:
             if self.attention_loss_function == 1:
                 # attention loss during training
@@ -102,7 +103,7 @@ class DaniNet(object):
                     self.default_weight = [35, 0.0005, 0.003, 1.5, 1.5]
                     self.minimum_input_similarity = 0.3 * 10 ** -14
                 else:
-                    self.default_weight = [1, 0.0005, 0.005, 0.5, 0.5]
+                    self.default_weight = [1, 0.000005, 0.01, 0.55, 0.55]
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
