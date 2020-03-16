@@ -4,13 +4,18 @@ from os import environ
 import os
 import argparse
 from progression_net import progression_net
-import pickle
 import pprint
 import numpy as np
 import MRI_assembler as MRI_assembler
 import re
 import glob as glob
 from joblib import Parallel, delayed
+import pickle
+from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+from sklearn.svm import SVR
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 environ['FSLOUTPUTTYPE'] = 'NIFTI'
@@ -26,8 +31,8 @@ def str2bool(v):
 
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=3)
-parser.add_argument('--phase', type=int, default=1)
+parser.add_argument('--conf', type=int, default=-3)
+parser.add_argument('--phase', type=int, default=4)
 parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
@@ -36,6 +41,7 @@ parser.add_argument('--savedir', type=str, default='save', help='dir of saving c
 parser.add_argument('--use_trained_model', type=str2bool, default=True, help='whether train from an existing model or from scratch')
 parser.add_argument('--use_init_model', type=str2bool, default=True, help='whether train from the init model if cannot find an existing model')
 parser.add_argument('--slice', type=int, default=100, help='slice')
+parser.add_argument('--super_resolution_3D', type=str2bool, default=True, help='activate 3D super-resolution')
 
 FLAGS = parser.parse_args()
 
@@ -75,11 +81,16 @@ def main(_):
     conditioned_enabled = False
     progression_enabled = False
     attention_loss_function = False
+    compute_volume_regression = 0
     V2_enabled = False  # fuzzy + logistic regressor
     test_label = ''
     outputFolder = ''
     num_epochs_transfer_learning = 1500
     type_of_assembly = 0  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
+    if FLAGS.super_resolution_3D:
+        super_resolution_label = '3D'
+    else:
+        super_resolution_label = ''
     if FLAGS.conf == 0:
         conditioned_enabled = False
         progression_enabled = False
@@ -93,7 +104,7 @@ def main(_):
         attention_loss_function = False
         V2_enabled = False
         test_label = '_DaniNet-V1'
-        outputFolder = 'SyntheticMRI_V1'
+        outputFolder = 'SyntheticMRI_V1' + super_resolution_label
         type_of_assembly = 1
         print('Selected DaniNet-V1 configuration')
     elif FLAGS.conf == 2:
@@ -102,7 +113,7 @@ def main(_):
         attention_loss_function = False
         V2_enabled = True
         test_label = '_DaniNet-V2'
-        outputFolder = 'SyntheticMRI_V2'
+        outputFolder = 'SyntheticMRI_V2' + super_resolution_label
         type_of_assembly = 1
         print('Selected DaniNet-V2 configuration')
     elif FLAGS.conf == 3:
@@ -112,7 +123,7 @@ def main(_):
         attention_loss_function = True
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2_AL'
-        outputFolder = 'SyntheticMRI_V2_AL'
+        outputFolder = 'SyntheticMRI_V2_AL' + super_resolution_label
         type_of_assembly = 2
         print('Select DaniNet-V2_AL configuration')
     elif FLAGS.conf == 4:
@@ -121,7 +132,7 @@ def main(_):
         progression_enabled = True
         attention_loss_function = False
         V2_enabled = True  # fuzzy + logistic regressor
-        outputFolder = 'SyntheticMRI_V1_NO_PWF'
+        outputFolder = 'SyntheticMRI_V1_NO_PWF' + super_resolution_label
         type_of_assembly = 2
         test_label = '_DaniNet-V1'
         print('Select DaniNet-V1_AL_no_PWF configuration')
@@ -132,20 +143,19 @@ def main(_):
         attention_loss_function = False
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2'
-        outputFolder = 'SyntheticMRI_V2_NO_PWF'
+        outputFolder = 'SyntheticMRI_V2_NO_PWF' + super_resolution_label
         type_of_assembly = 2
         print('Select DaniNet-V2_AL_no_PWF configuration')
     elif FLAGS.conf == 6:
-        #num_epochs_transfer_learning = 600
+        # num_epochs_transfer_learning = 600
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = True
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2_AL'
-        outputFolder = 'SyntheticMRI_V2_LA_noSpatial'
+        outputFolder = 'SyntheticMRI_V2_AL_noSpatial' + super_resolution_label
         type_of_assembly = 1
-        print('Select DaniNet-V2_AL_LA_noSpatial configuration')
-
+        print('Select DaniNet-V2_AL_AL_noSpatial configuration')
     elif FLAGS.conf == 7:
         num_epochs_transfer_learning = 600
         conditioned_enabled = True
@@ -153,17 +163,34 @@ def main(_):
         attention_loss_function = True
         V2_enabled = True  # fuzzy + logistic regressor
         test_label = '_DaniNet-V2_AL'
-        outputFolder = 'SyntheticMRI_V2_LA_x2TF'
+        outputFolder = 'SyntheticMRI_V2_AL_x2TF' + super_resolution_label
         type_of_assembly = 2
         print('Select DaniNet-V2_ALLA_x2TF configuration')
+    elif FLAGS.conf == 8:
+        num_epochs_transfer_learning = 1500
+        conditioned_enabled = True
+        progression_enabled = True
+        attention_loss_function = True
+        V2_enabled = True  # fuzzy + logistic regressor
+        test_label = '_DaniNet-V2_AL_bin'
+        outputFolder = 'SyntheticMRI_V2_AL_bin' + super_resolution_label
+        type_of_assembly = 2
+        print('Select DaniNet-V2_AL_bin configuration')
     elif FLAGS.conf == -1:
         outputFolder = 'SyntheticRealFollowUp'
         type_of_assembly = 0
         print('Selected assembly input modality')
+        FLAGS.super_resolution_3D = False
     elif FLAGS.conf == -2:
-        outputFolder = 'SyntheticProgressionMRI'
+        outputFolder = 'SyntheticProgressionMRI' + super_resolution_label
         test_label = '_DaniNet-V2_AL'
         print('Selected assembly progression modality')
+    elif FLAGS.conf == -3:
+        outputFolder = 'SyntheticRealTraining'
+        type_of_assembly = 3
+        compute_volume_regression = 1
+        print('Selected assembly linear regressor')
+        FLAGS.super_resolution_3D = False
     else:
         print('Please select one of the available modality.')
         exit()
@@ -203,10 +230,12 @@ def main(_):
         test_label = 'sample_Test_after_TL'
         if FLAGS.conf == -2:
             MRI_assembler.assemblyAll_progression(test_label, age_intervals, outputFolder, FLAGS)
+        elif FLAGS.conf == -3:
+            MRI_assembler.assemblyTraining(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
         else:
             MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
     if FLAGS.phase == 4:
-        evaluation(outputFolder, True)
+        evaluation(outputFolder, False, compute_volume_regression)
 
 
 def get_follow_up_age(fileName, quaries_for_progression):
@@ -217,7 +246,24 @@ def get_follow_up_age(fileName, quaries_for_progression):
         return -1
 
 
-def evaluation(outputFolder, run_FSL):
+def extract_data_frame(file_list):
+    ID = ["" for _ in range(np.size(file_list))]
+    ages = np.zeros([np.size(file_list)])
+    gender = np.zeros([np.size(file_list)])
+    diagnos = np.zeros([np.size(file_list)])
+    for i, currFileName in enumerate(file_list):
+        ages[i] = os.path.basename(currFileName).split('_')[0]
+        ID[i] = currFileName.split('ADNI')[1][1:11]
+        if os.path.basename(currFileName).split('_')[1].isdigit():
+            gender[i] = os.path.basename(currFileName).split('_')[1]
+        else:
+            gender[i] = -1
+        diagnos[i] = os.path.basename(currFileName).split('_')[2]
+    ID = [ID.index(l) for l in ID]
+    return ID, ages, gender, diagnos
+
+
+def evaluation(outputFolder, run_FSL, compute_volume_regression):
     # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
     number_of_considered_brain_regions = 7
     number_of_parallel_jobs = 12
@@ -233,27 +279,87 @@ def evaluation(outputFolder, run_FSL):
     result = np.zeros((np.size(input_files), number_of_considered_brain_regions))
     for i, file in enumerate(input_files):
         result[i, :] = (extract_volumes('./FLS_RealFollowUp_MRI/', file))
+    #f = open('objs_2.pkl', 'rb')
+    #result = pickle.load(f)
+    #f.close()
 
-    input_files = glob.glob('./' + outputFolder + '/' + "*.nii*")
-    if not os.path.exists('./FLS_' + outputFolder + '/'):
-        os.system('mkdir ./FLS_' + outputFolder + '/')
-    if run_FSL:
-        Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)('./FLS_' + outputFolder + '/', i) for i in input_files)
-    result2 = np.zeros((np.size(input_files), number_of_considered_brain_regions))
-    for i, file in enumerate(input_files):
-        result2[i, :] = (extract_volumes('./FLS_' + outputFolder + '/', file))
+    if compute_volume_regression:
+        saved_folder = '/media/dravi/data/CVPR/FLS_RealFollowUp_MRI/'
+        synthetic_input_files = glob.glob('./SyntheticRealTraining/' + "*.nii*")
+        if run_FSL:
+            Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)(saved_folder, i) for i in synthetic_input_files)
+        synthetic_result = np.zeros((np.size(synthetic_input_files), number_of_considered_brain_regions))
+
+        # for i, file in enumerate(synthetic_input_files):
+        #    synthetic_result[i, :] = (extract_volumes(saved_folder, file))
+        # with open('objs.pkl', 'wb') as f:
+        #    pickle.dump(synthetic_result, f)
+        f = open('objs.pkl', 'rb')
+        synthetic_result = pickle.load(f)
+        f.close()
+        [ID, ages, gender, diagnos] = extract_data_frame(synthetic_input_files)
+        linear_regressor = 0
+        mixed_effect_model = 1
+        svm = 0
+        for i in range(number_of_considered_brain_regions):
+            synthetic_result[synthetic_result[:, i] < 0] = 0
+        model = np.array([object() for _ in range(number_of_considered_brain_regions)])
+        data = {'ages': ages, 'ID': ID, 'gender': gender, 'diagnos': diagnos, 'vol0': synthetic_result[:, 0], 'vol1': synthetic_result[:, 1],
+                'vol2': synthetic_result[:, 2],
+                'vol3': synthetic_result[:, 3], 'vol4': synthetic_result[:, 4], 'vol5': synthetic_result[:, 5], 'vol6': synthetic_result[:, 5]}
+        for i in range(number_of_considered_brain_regions):
+            if linear_regressor:
+                model[i].fit(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).reshape(-1, 3),
+                             synthetic_result[:, i])  # linear regressor population based
+            if mixed_effect_model:
+                model[i] = smf.mixedlm("vol" + str(i) + " ~ ages+gender+diagnos+ID", data, groups=(data["diagnos"]))
+                model[i] = model[i].fit()
+            if svm:
+                model[i] = SVR(C=10, coef0=0.0, degree=1, epsilon=0.05, gamma='auto',
+                          kernel='rbf', max_iter=-1, shrinking=True, tol=0.001, verbose=True)
+                model[i].fit(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).reshape(-1, 3), synthetic_result[:, i])
+
+        [ID, ages, gender, diagnos] = extract_data_frame(input_files)
+        result2 = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+        for i in range(number_of_considered_brain_regions):
+            if linear_regressor:
+                result2[:, i] = model[i].predict(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).reshape(-1, 3))
+            if mixed_effect_model:
+                data = {'ages': ages, 'ID': ID, 'gender': gender, 'diagnos': diagnos}
+                result2[:, i] = model[i].predict(data)
+            if svm:
+                result2[:, i] = model[i].predict(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).reshape(-1, 3))
+    else:
+        input_files = glob.glob('./' + outputFolder + '/' + "*.nii*")
+        if not os.path.exists('./FLS_' + outputFolder + '/'):
+            os.system('mkdir ./FLS_' + outputFolder + '/')
+        if run_FSL:
+            Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)('./FLS_' + outputFolder + '/', i) for i in input_files)
+        result2 = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+        for i, file in enumerate(input_files):
+            result2[i, :] = (extract_volumes('./FLS_' + outputFolder + '/', file))
+
+    totErr = np.zeros((np.size(input_files), number_of_considered_brain_regions))
+    index = [False for _ in range(np.size(input_files))]
+    for j in range(number_of_considered_brain_regions):
+        for i in range(np.size(input_files)):
+            totErr[i, j] = abs(result[i, j] - result2[i, j])  # * normalization_by_age
+        # result[:, j] = result[:, j] - np.mean(totErr[:, j])
+        # result[:, j] = [0 if a_ < 0 else a_ for a_ in result[:, j]]
+        index = index + (totErr[:, j] > np.sort(totErr[:, j])[-3])  # remove sample where the estimation of the volumes fails
+    result[index, :] = 0
 
     totErr = np.zeros((np.size(input_files), number_of_considered_brain_regions))
     for j in range(number_of_considered_brain_regions):
         curr_index = 0
         for i in range(np.size(input_files)):
-            if not (result[i, j] == 0) and not (result2[i, j] == 0):
-                #positionInlist = get_follow_up_age(input_files[i], MRI_assembler.quaries_for_progression)
+            if not (result[i, j] <= 0) and not (result2[i, j] <= 0):
+                # positionInlist = get_follow_up_age(input_files[i], MRI_assembler.quaries_for_progression)
                 # normalization_by_age = float(MRI_assembler.quaries_for_progression[positionInlist][1]) - float(
                 #    MRI_assembler.quaries_for_progression[positionInlist][0].split('_')[0])
                 totErr[curr_index, j] = abs(result[i, j] - result2[i, j])  # * normalization_by_age
                 curr_index = curr_index + 1
-        print("{0:.3f}".format(np.mean(totErr[:curr_index - 1, j])) + '$\pm$' + "{0:.3f}".format(np.std(totErr[:curr_index - 1, j])) + '&')
+        print("{0:.3f}".format(np.mean(totErr[:curr_index - 1, j])) + ' $\pm$ ' + "{0:.3f}".format(np.std(totErr[:curr_index - 1, j])) + '&')
 
 
 def testing(curr_slice, conditioned_enabled, output_dir, max_regional_expansion, map_disease, age_intervals, V2_enabled, regressor_type):
@@ -354,9 +460,14 @@ def extract_volumes(FSL_output, input_file):
     text_file.close()
     t = 2
     for i in range(np.size(lines) - 5, np.size(lines)):
-        Vol[t] = float(re.findall('\d+\.\d+', lines[i])[0])
+        if np.size(re.findall('\d+\.\d+', lines[i])) > 0:
+            Vol[t] = float(re.findall('\d+\.\d+', lines[i])[0])
+        elif np.size(re.findall('\d+', lines[i])) > 0:
+            Vol[t] = float(re.findall('\d+', lines[i])[0])
+        else:
+            Vol[t] = -1
         t = t + 1
-    return Vol / Vol[6] * 100
+    return Vol #/ Vol[6] * 100
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
