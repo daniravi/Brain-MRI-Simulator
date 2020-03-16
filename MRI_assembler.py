@@ -7,14 +7,14 @@ import skfuzzy
 import glob as glob
 import os
 from skimage.exposure import match_histograms
-from DCSRN.tf_dcsrn import dcsrn, image_util
+from DCSRN.tf_dcsrn import dcsrn
 
 output_path = "./DCSRN/snapshots/"
 dataset_HCP = "./DCSRN/HCP_NPY_Augment/"
 net = dcsrn.DCSRN(channels=1)
 path = os.path.join(output_path, "model.cpkt")
+basefolder='/media/dravi/data/CVPR/processed/'
 
-# todo the name of the folder for the synthetic data are equal to the input name rather than to the follow-up
 transformationMatrix = [[0, -1, 0, 0],
                         [0, 0, 1, 0],
                         [1, 0, 0, 0],
@@ -228,11 +228,15 @@ def generate_MRI(generated_images, age_to_generate, age_intervals):
 
 def averaging_5_slice(curr_slice, folder, fileName, FLAGS):
     a = np.ones((5, 128 * 10, 128 * 10), dtype=np.float)
-    a[0, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
-    a[1, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
-    a[2, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
-    a[3, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
-    a[4, :, :] = imread('./' + FLAGS.savedir + '/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
+    a[0, :, :] = imread(
+        basefolder + FLAGS.savedir + '/' + str(curr_slice - 2) + '/' + folder + '/test_2_' + fileName)
+    a[1, :, :] = imread(
+        basefolder + FLAGS.savedir + '/' + str(curr_slice - 1) + '/' + folder + '/test_1_' + fileName)
+    a[2, :, :] = imread(basefolder + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+    a[3, :, :] = imread(
+        basefolder + FLAGS.savedir + '/' + str(curr_slice + 1) + '/' + folder + '/test_-1_' + fileName)
+    a[4, :, :] = imread(
+        basefolder + FLAGS.savedir + '/' + str(curr_slice + 2) + '/' + folder + '/test_-2_' + fileName)
     return a[0, :, :] * gaussian(2) + a[1, :, :] * gaussian(1) + a[2, :, :] * gaussian(0) + a[3, :, :] * gaussian(1) + a[4, :,
                                                                                                                        :] * gaussian(2)
 
@@ -253,28 +257,44 @@ def assembly_Progression(fileName, folder, age_intervals, outputFolder, FLAGS):
             final_MRI[i, :, :, j] = np.int16(generate_MRI(progression_MRI, age_intervals[j], age_intervals) * 32767 * 2 - 32767)
             curr_slice = curr_slice + 1
 
+    if FLAGS.super_resolution_3D:
+        for j in range(10):
+            img_in = nib.load('./SyntheticInputMRI/' + fileName + '.nii.gz')
+            data_img_in = np.array(img_in.dataobj)
+            curr_age = fileName.split('_')[0]
+            data_img_pre = final_MRI[:, :, :, j].reshape([np.size(final_MRI, 0), np.size(final_MRI, 1), np.size(final_MRI, 2)])
+            final_MRI[:, :, :, j] = assembly_3D_core(data_img_in, data_img_pre, curr_age, age_intervals[j])
     img = nib.Nifti1Image(final_MRI, transformationMatrix)
     nib.save(img, outputFolder + '/' + fileName + '.nii.gz')
 
 
-def assembly_3D(file, folder, age):
-    if not os.path.exists(folder + '_3D'):
-        os.system('mkdir ' + folder + '_3D')
+def assembly_3D_core(data_img_in, data_img_pre, curr_age, age):
+    curr_age = np.double(curr_age)
+    result = data_img_pre.reshape([1, np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2), 1])
+    result2 = net.predict(path, result)
+    matched = match_histograms(result2.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]),
+                               data_img_in.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]), multichannel=True)
+
+    propotion = np.power(abs(curr_age - age), 1 / 2) / np.power(25, 1 / 2)
+    if curr_age < age:
+        matched = data_img_in * (1 - propotion) + np.minimum(matched, data_img_in.reshape(
+            [np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)])) * propotion
+    else:
+        matched = data_img_in * (1 - propotion) + np.maximum(matched, data_img_in.reshape(
+            [np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)])) * propotion
+
+    return matched
+
+
+def assembly_3D(file, folder, age, data_img_pre):
+    if not os.path.exists(folder):
+        os.system('mkdir ' + folder)
     curr_age = file.split('_')[0]
     img_in = nib.load('./SyntheticInputMRI/' + file)
-    img_pre = nib.load('./'+folder +'/'+ os.path.basename(file))
     data_img_in = np.array(img_in.dataobj)
-    data_img_pre = np.array(img_pre.dataobj)
-    result = data_img_pre.reshape([1, np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2), 1])
-    result = net.predict(path, result)
-    matched = match_histograms(result.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]),
-                               data_img_in.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]), multichannel=True)
-    if np.double(curr_age) < age:
-        matched = np.minimum(matched, data_img_in.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]))
-    else:
-        matched = np.maximum(matched, data_img_in.reshape([np.size(data_img_pre, 0), np.size(data_img_pre, 1), np.size(data_img_pre, 2)]))
+    matched = assembly_3D_core(data_img_in, data_img_pre, curr_age, age)
     array_img = nib.Nifti1Image(matched.reshape([np.size(data_img_in, 0), np.size(data_img_in, 1), np.size(data_img_in, 2)]), transformationMatrix)
-    nib.save(array_img, folder + '_3D/' + os.path.basename(file))
+    nib.save(array_img, folder + '/' + os.path.basename(file))
 
 
 def assembly_MRI(fileName, folder, age_to_generate, age_intervals, outputFolder, type_of_assembly, FLAGS):
@@ -282,26 +302,26 @@ def assembly_MRI(fileName, folder, age_to_generate, age_intervals, outputFolder,
     numb_Slice = 95
     print(fileName)
     final_MRI = np.ones((numb_Slice, 128, 128), dtype=np.int16)
-    if FLAGS.create_MRI:
-        for i in range(0, numb_Slice):
-            if type_of_assembly == 0:
-                followUpFile = glob.glob('./data/' + FLAGS.datasetGT + '/' + str(curr_slice) + '/' + str(age_to_generate) + '*.png')
-                final_MRI[i, :, :] = imread('./data/' + FLAGS.datasetGT + '/' + str(curr_slice) + '/' + os.path.basename(followUpFile[0]))
-            elif type_of_assembly == 1:
-                progression_MRI = imread('./' + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
-                final_MRI[i, :, :] = np.int16(generate_MRI(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
-            elif type_of_assembly == 2:
-                progression_MRI = averaging_5_slice(curr_slice, folder, fileName, FLAGS)
-                final_MRI[i, :, :] = np.int16(generate_MRI(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
-            elif type_of_assembly == 3:
-                followUpFile = glob.glob('./data/' + FLAGS.dataset + '/' + str(curr_slice) + '/' + str(age_to_generate) + '*.png')
-                final_MRI[i, :, :] = imread('./data/' + FLAGS.dataset + '/' + str(curr_slice) + '/' + os.path.basename(followUpFile[0]))
-            curr_slice = curr_slice + 1
 
+    for i in range(0, numb_Slice):
+        if type_of_assembly == 0:
+            followUpFile = glob.glob('./data/' + FLAGS.datasetGT + '/' + str(curr_slice) + '/' + str(age_to_generate) + '*.png')
+            final_MRI[i, :, :] = imread('./data/' + FLAGS.datasetGT + '/' + str(curr_slice) + '/' + os.path.basename(followUpFile[0]))
+        elif type_of_assembly == 1:
+            progression_MRI = imread(basefolder + FLAGS.savedir + '/' + str(curr_slice) + '/' + folder + '/test_0_' + fileName)
+            final_MRI[i, :, :] = np.int16(generate_MRI(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
+        elif type_of_assembly == 2:
+            progression_MRI = averaging_5_slice(curr_slice, folder, fileName, FLAGS)
+            final_MRI[i, :, :] = np.int16(generate_MRI(progression_MRI, age_to_generate, age_intervals) * 32767 * 2 - 32767)
+        elif type_of_assembly == 3:
+            followUpFile = glob.glob('./data/' + FLAGS.dataset + '/' + str(curr_slice) + '/' + str(age_to_generate) + '*.png')
+            final_MRI[i, :, :] = imread('./data/' + FLAGS.dataset + '/' + str(curr_slice) + '/' + os.path.basename(followUpFile[0]))
+        curr_slice = curr_slice + 1
+    if FLAGS.super_resolution_3D:
+        assembly_3D(fileName + '.nii.gz', outputFolder, age_to_generate, final_MRI)
+    else:
         img = nib.Nifti1Image(final_MRI, transformationMatrix)
         nib.save(img, outputFolder + '/' + fileName + '.nii.gz')
-    if FLAGS.super_resolution_3D:
-        assembly_3D(fileName+ '.nii.gz', outputFolder, age_to_generate)
 
 
 def assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS):
@@ -310,9 +330,15 @@ def assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS
 
 
 def assemblyTraining(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS):
+    id = ["" for i in range(179)]
+    for i in range(179):
+        id[i] = quaries_for_progression[i][0].split('ADNI')[1][1:11]
+
     allTrainingFile = glob.glob('./data/' + FLAGS.dataset + '/' + str(42) + '/*.png')
     for i in allTrainingFile:
         currFile = os.path.basename(i)
+        currId=currFile.split('ADNI')[1][1:11]
+        #if currId in id:
         assembly_MRI(currFile, test_label, currFile.split('_')[0], age_intervals, outputFolder, type_of_assembly, FLAGS)
 
 
