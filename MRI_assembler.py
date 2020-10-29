@@ -13,7 +13,7 @@ output_path = "./DCSRN/snapshots/"
 dataset_HCP = "./DCSRN/HCP_NPY_Augment/"
 net = dcsrn.DCSRN(channels=1)
 path = os.path.join(output_path, "model.cpkt")
-basefolder='/media/dravi/data/CVPR/processed/'
+basefolder = '/media/dravi/data/CVPR/processed/'
 
 transformationMatrix = [[0, -1, 0, 0],
                         [0, 0, 1, 0],
@@ -337,8 +337,8 @@ def assemblyTraining(test_label, age_intervals, outputFolder, type_of_assembly, 
     allTrainingFile = glob.glob('./data/' + FLAGS.dataset + '/' + str(42) + '/*.png')
     for i in allTrainingFile:
         currFile = os.path.basename(i)
-        currId=currFile.split('ADNI')[1][1:11]
-        #if currId in id:
+        currId = currFile.split('ADNI')[1][1:11]
+        # if currId in id:
         assembly_MRI(currFile, test_label, currFile.split('_')[0], age_intervals, outputFolder, type_of_assembly, FLAGS)
 
 
