@@ -4,3 +4,7 @@ Synthetic*
 FLS_*
 save_*
 *.pkl
+data
+venv
+DCSRN
+init_model/tmp/
