@@ -18,6 +18,7 @@ from sklearn import linear_model
 from sklearn.svm import SVR
 from scipy.stats import iqr
 
+
 import statsmodels.api as sm
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
@@ -68,11 +69,19 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+# model initialization: initialization_step=0, use_init_model=false,phase 1, config=2 ,epoch =100
+# model initialization: initialization_step=1, use_init_model=True,phase 1, config=2 ,epoch=300
+# model initialization: initialization_step=2, use_init_model=True,phase 1, config=2,epoch =300
+# phase2 conf 7
+# phase3 conf -1, #create synthetic images
+# phase3 conf -3, #create synthetic images
+# phase4 conf 7 regression -1  #run_FSL= true
+# phase4 conf 7 regression  any
 
 parser = argparse.ArgumentParser(description='DaniNet')
-parser.add_argument('--conf', type=int, default=9)
+parser.add_argument('--conf', type=int, default=7)
 parser.add_argument('--phase', type=int, default=4)
-parser.add_argument('--epoch', type=int, default=300, help='number of epochs')
+parser.add_argument('--epoch', type=int, default=1000, help='number of epochs')
 parser.add_argument('--dataset', type=str, default='TrainingSetMRI', help='training dataset name that stored in ./data')
 parser.add_argument('--datasetTL', type=str, default='TransferLr', help='transfer learning dataset name that stored in ./data')
 parser.add_argument('--datasetGT', type=str, default='PredictionGT', help='testing dataset name that stored in ./data')
@@ -80,7 +89,9 @@ parser.add_argument('--savedir', type=str, default='save', help='dir of saving c
 parser.add_argument('--use_trained_model', type=str2bool, default=True, help='whether train from an existing model or from scratch')
 parser.add_argument('--use_init_model', type=str2bool, default=True, help='whether train from the init model if cannot find an existing model')
 parser.add_argument('--slice', type=int, default=100, help='slice')
-parser.add_argument('--super_resolution_3D', type=str2bool, default=False, help='activate 3D super-resolution')
+parser.add_argument('--super_resolution_3D', type=str2bool, default=True, help='activate 3D super-resolution')
+parser.add_argument('--run_FSL', type=str2bool, default=True, help='run_FSL')
+parser.add_argument('--initialization_step', type=int, default=-1, help='run_FSL')
 
 FLAGS = parser.parse_args()
 
@@ -135,6 +146,7 @@ def main(_):
     if FLAGS.conf == 0:
         conditioned_enabled = False
         progression_enabled = False
+        outputFolder = 'SyntheticMRI_V0' + super_resolution_label
         attention_loss_function = False
         V2_enabled = False
         test_label = '_baseline'
@@ -198,7 +210,7 @@ def main(_):
         type_of_assembly = 1
         print('Select DaniNet-V2_AL_AL_noSpatial configuration')
     elif FLAGS.conf == 7:
-        num_epochs_transfer_learning = 600
+        num_epochs_transfer_learning = 1500
         conditioned_enabled = True
         progression_enabled = True
         attention_loss_function = True
@@ -223,13 +235,10 @@ def main(_):
         progression_enabled = True
         attention_loss_function = True
         V2_enabled = True  # fuzzy + logistic regressor
-        test_label = '_DaniNet-V2_AL_x2TF3D_no_transfer'
-
-        outputFolder = 'SyntheticMRI_V2_AL_x2TF3D_Loss4_removed' + super_resolution_label
-        outputFolder = 'SyntheticMRI_V2_AL_x2TF3D_no_transfer' + super_resolution_label
-
+        test_label = '_DaniNet-V2_AL_x2TF3D_no_Loss4'
+        outputFolder = 'SyntheticMRI_V2_AL_x2TF3D_no_Loss4' + super_resolution_label
         type_of_assembly = 2
-        print('Select DaniNet-V2_AL_bin configuration')
+        print('Select DaniNet-V2_AL_x2TF3D_no_Loss4 configuration')
     elif FLAGS.conf == -1:
         outputFolder = 'SyntheticRealFollowUp'
         type_of_assembly = 0
@@ -240,7 +249,7 @@ def main(_):
         test_label = '_DaniNet-V2_AL'
         print('Selected assembly progression modality')
     elif FLAGS.conf == -3:
-        outputFolder = 'SyntheticRealTraining'
+        outputFolder = 'SyntheticRealTest'
         type_of_assembly = 3
         print('Selected assembly linear regressor')
         FLAGS.super_resolution_3D = False
@@ -268,7 +277,7 @@ def main(_):
     if FLAGS.phase == 1:
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
-                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type)
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type,initialization_step=FLAGS.initialization_step)
         # testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
         #        map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 2:
@@ -288,7 +297,7 @@ def main(_):
         else:
             MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
     if FLAGS.phase == 4:
-        evaluation(outputFolder, False, type_of_regressor, correct_model_bias, remove_outlier)
+        evaluation(outputFolder, FLAGS.run_FSL, type_of_regressor, correct_model_bias, remove_outlier)
 
 
 def get_follow_up_age(fileName, quaries_for_progression):
@@ -335,15 +344,15 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
         result[i, :] = (extract_volumes('./FLS_RealFollowUp_MRI/', file))
 
     if type_of_regressor >= 0:
-        synthetic_input_files = glob.glob('./SyntheticRealTraining/' + "*.nii*")
+        synthetic_input_files = glob.glob('./SyntheticRealTest/' + "*.nii*")
         if run_FSL:
             Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)(saved_folder, i) for i in synthetic_input_files)
         synthetic_result = np.zeros((np.size(synthetic_input_files), number_of_considered_brain_regions))
 
-        # for i, file in enumerate(synthetic_input_files):
-        #   synthetic_result[i, :] = (extract_volumes(saved_folder, file))
-        # with open('objs.pkl', 'wb') as f:
-        #    pickle.dump(synthetic_result, f)
+        for i, file in enumerate(synthetic_input_files):
+          synthetic_result[i, :] = (extract_volumes(saved_folder, file))
+        with open('objs.pkl', 'wb') as f:
+           pickle.dump(synthetic_result, f)
         f = open('objs.pkl', 'rb')
         synthetic_result = pickle.load(f)
         f.close()
@@ -416,8 +425,8 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
             result[:, j] = [0 if a_ < 0 else a_ for a_ in result[:, j]]
         #index = index + (totErr[:, j] > np.sort(totErr[:, j])[-3])  # remove sample where the estimation of the volumes fails
         index = index + (totErrAbs[:, j] > (np.median(totErrAbs[:, j]) + 3 * iqr(totErrAbs[:, j])))
-
-    result[index, :] = 0
+    if np.shape(index)[0]>1:
+        result[index, :] = 0
 
     totErr = np.zeros((np.size(input_files), number_of_considered_brain_regions))
     for j in range(number_of_considered_brain_regions):
@@ -541,7 +550,7 @@ def extract_volumes(FSL_output, input_file):
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
-             output_dir, regressor_type):
+             output_dir, regressor_type,initialization_step):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
@@ -560,7 +569,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             age_intervals=age_intervals,
             V2_enabled=V2_enabled,
             regressor_type=regressor_type,
-            attention_loss_function=attention_loss_function
+            attention_loss_function=attention_loss_function,
+            initialization_step=initialization_step
         )
 
         print('\n\tTraining Mode')
@@ -571,7 +581,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
                 use_trained_model=FLAGS.use_trained_model,
                 use_init_model=False,
                 conditioned_enabled=conditioned_enabled,
-                progression_enabled=progression_enabled
+                progression_enabled=progression_enabled,
+                initialization_step=initialization_step
             )
             print('\n\tPre-train is done! The training will start.')
             FLAGS.use_trained_model = True
@@ -580,7 +591,8 @@ def training(curr_slice, conditioned_enabled, progression_enabled, attention_los
             use_trained_model=FLAGS.use_trained_model,
             use_init_model=FLAGS.use_init_model,
             conditioned_enabled=conditioned_enabled,
-            progression_enabled=progression_enabled
+            progression_enabled=progression_enabled,
+            initialization_step=initialization_step
         )
     tf.reset_default_graph()
 
