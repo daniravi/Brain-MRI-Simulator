@@ -34,7 +34,8 @@ class DaniNet(object):
                  V2_enabled=True,
                  regressor_type=1,
                  attention_loss_function=1,
-                 binned=False
+                 binned=False,
+                 initialization_step=-1
                  ):
 
         self.session = session
@@ -107,18 +108,28 @@ class DaniNet(object):
         else:
             self.default_weight = [0.6, 0.0002, 0.0006, 0.008, 0.008]
             self.minimum_input_similarity = 0
+        if initialization_step==0:
+            #100 iterazioni
+            print('Train Deep Auto-Encoder')
+            self.minimum_input_similarity = 0.05 * 10 ** 0.7
+            self.default_weight = [10, 0, 0, 0.05, 0]
+            self.is_binned=False
+        elif initialization_step==1:
+            print('Train 2 discriminators')
+            #300 iterazioni
+            self.minimum_input_similarity = 0.05 * 10 ** -1
+            self.default_weight = [10, 0, 0, 0, 0]
+        elif initialization_step == 2:
+            print('Add the phisical constrains')
+            #300 iterazioni
+            self.default_weight = [10, 0, 0, 7, 7]
+            self.minimum_input_similarity = 0.05 * 10 ** -15
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of default_weight
         # default_weight*loss_average must be equal to to a fixed value.
         # In our case the fixed value is 0.04. This value can be anything as far the product with the weights is constant
         self.focus_learning_rate = 0.99  # increase the value if you want to focus more
         self.focus_learning_initial_point_multiplier = 10
-        # 0)similarity with the image # the sum need to be equal to 1 (population average vs personality)
-        # 1)realistic image (smaller is more realistic structures)   (realistic structure vs number of epoch)
-        # 2)smoothing in progression (0 very smooth , 1 major freedom to be different), (temporal smoothing vs progression)
-        # 3)pixel loss  (progression)
-        # 4)regional loss (progression-> reliability of progression prior)
-
         self.bin_centers = np.convolve(self.age_intervals, [0.5, 0.5], 'valid')
         self.bin_size = np.diff(self.bin_centers)
         self.bin_size = np.append(self.bin_size, self.bin_size[self.bin_size.size - 1])
@@ -276,8 +287,12 @@ class DaniNet(object):
               n_epoch_to_save=20,
               conditioned_enabled=True,
               progression_enabled=True,
+              initialization_step=-1
               ):
-
+        if initialization_step==0 or initialization_step==1:
+            learning_rate = 0.0001
+        elif initialization_step==2:
+            learning_rate = 0.0003
         current_weights = self.default_weight
         file_names = glob(os.path.join('./data', self.dataset_name, str(self.slice_number), '*.png'))
         size_data = len(file_names)
@@ -310,22 +325,40 @@ class DaniNet(object):
             )
 
             # optimizer for discriminator on z
-            self.D_z_optimizer = tf.train.AdamOptimizer(
-                learning_rate=EG_learning_rate,
-                beta1=beta1
-            ).minimize(
-                loss=self.loss_Dz,
-                var_list=self.D_z_variables
-            )
+            if initialization_step==0:
+                self.D_z_optimizer = tf.train.AdamOptimizer(
+                    learning_rate=EG_learning_rate*0,
+                    beta1=beta1
+                ).minimize(
+                    loss=self.loss_Dz,
+                    var_list=self.D_z_variables
+                )
 
-            # optimizer for discriminator on image
-            self.D_img_optimizer = tf.train.AdamOptimizer(
-                learning_rate=EG_learning_rate,
-                beta1=beta1
-            ).minimize(
-                loss=self.loss_Di,
-                var_list=self.D_img_variables
-            )
+                # optimizer for discriminator on image
+                self.D_img_optimizer = tf.train.AdamOptimizer(
+                    learning_rate=EG_learning_rate*0,
+                    beta1=beta1
+                ).minimize(
+                    loss=self.loss_Di,
+                    var_list=self.D_img_variables
+                )
+            else:
+                self.D_z_optimizer = tf.train.AdamOptimizer(
+                    learning_rate=EG_learning_rate,
+                    beta1=beta1
+                ).minimize(
+                    loss=self.loss_Dz,
+                    var_list=self.D_z_variables
+                )
+
+                # optimizer for discriminator on image
+                self.D_img_optimizer = tf.train.AdamOptimizer(
+                    learning_rate=EG_learning_rate,
+                    beta1=beta1
+                ).minimize(
+                    loss=self.loss_Di,
+                    var_list=self.D_img_variables
+                )
 
         # *********************************** tensorboard *************************************************************
         self.EG_learning_rate_summary = tf.summary.scalar('EG_learning_rate', EG_learning_rate)
@@ -356,6 +389,15 @@ class DaniNet(object):
                         except:
                             raise Exception('Error joining files')
                     self.load_checkpoint(model_path='init_model')
+        if initialization_step==0:
+            #init_new_vars_op = tf.variables_initializer([*self.D_z_variables,*self.D_img_variables])
+            #init_new_vars_op = tf.variables_initializer([*self.E_variables, *self.G_variables])
+            #init_new_vars_op = tf.variables_initializer([*self.G_variables])
+            init_new_vars_op = tf.variables_initializer([*self.D_img_variables,*self.D_z_variables])
+            init_new_vars_op.run()
+        #init_new_vars_op = tf.variables_initializer([*self.D_z_variables])
+        #init_new_vars_op.run()
+
 
         num_batches = len(file_names) // self.size_batch
 
@@ -488,6 +530,18 @@ class DaniNet(object):
                 current_weights[4] = np.power(self.focus_learning_rate, curr_epoch) * (self.default_weight[4] - finalLimit) + finalLimit
 
                 self.define_loss_EF(progression_enabled, current_weights)
+
+            if initialization_step==1:
+                current_weights[1] = (self.deformation_loss * current_weights[0] / self.G_img_loss)
+                current_weights[2] = (self.G_img_loss * current_weights[1] /  self.E_z_loss)
+                #current_weights[3] = (self.E_z_loss * current_weights[2] / self.pixel_regres_loss)/10
+                #current_weights[4] = (self.pixel_regres_loss * current_weights[3] / self.region_regres_loss)/10
+                self.define_loss_EF(progression_enabled, current_weights)
+            elif initialization_step == 2:
+                current_weights[1] = (self.deformation_loss * current_weights[0] / self.G_img_loss)  *2
+                current_weights[2] = (self.G_img_loss * current_weights[1] / self.E_z_loss)*2
+                self.define_loss_EF(progression_enabled, current_weights)
+
             self.writer.add_summary(summary, self.EG_global_step.eval() + self.initial_global_step)
             print("\nEpoch: [%3d/%3d]\n" % (epoch + 1, num_epochs))
             elapse = time.time() - start_time
@@ -817,10 +871,14 @@ class DaniNet(object):
         # deformation loss
         pixel_reg_loss = self.voxel_based_constrain(frames_progression, selected_query_images, curr_age)
         deformation_loss = 0
-        for i in range(self.num_progression_points):
+        for i in range(self.num_progression_points-1):
             intensity_rate_changeFrame = tf.gather(frames_progression, i)
             deformation_loss = deformation_loss + tf.reduce_mean(tf.abs(intensity_rate_changeFrame - selected_query_images)) * \
                                (fuzzy_membership[i] + self.minimum_input_similarity)
+        intensity_rate_changeFrame = tf.gather(frames_progression, self.num_progression_points-1)
+        deformation_loss = deformation_loss + tf.reduce_mean(
+            tf.abs(intensity_rate_changeFrame - selected_query_images)) * \
+                           (fuzzy_membership[self.num_progression_points-1]*1.3 + self.minimum_input_similarity)
         return pixel_reg_loss, deformation_loss
 
     def voxel_based_constrain(self, frames_progression, selected_query_images, curr_age):
