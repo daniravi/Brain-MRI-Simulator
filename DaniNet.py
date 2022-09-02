@@ -122,7 +122,7 @@ class DaniNet(object):
         elif initialization_step == 2:
             print('Add the phisical constrains')
             #300 iterazioni
-            self.default_weight = [10, 0, 0, 7, 7]
+            self.default_weight = [10, 0, 0, 2, 2]
             self.minimum_input_similarity = 0.05 * 10 ** -15
         # ****************************************** Framework Parameters ***************************************************
         self.bin_variance_scale = 0.2  # this is connected with the first parameter of default_weight
@@ -284,7 +284,7 @@ class DaniNet(object):
               enable_shuffle=True,  # enable shuffle of the dataset
               use_trained_model=True,  # use the saved checkpoint to initialize the network
               use_init_model=True,  # use the init model to initialize the network
-              n_epoch_to_save=20,
+              n_epoch_to_save=1,
               conditioned_enabled=True,
               progression_enabled=True,
               initialization_step=-1
