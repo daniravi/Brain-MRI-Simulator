@@ -1,6 +1,7 @@
 import tensorflow as tf
 import sys
 import os
+
 sys.path.append(os.path.abspath('./DCSRN/'))
 from DaniNet import DaniNet
 from os import environ
@@ -17,7 +18,6 @@ import statsmodels.formula.api as smf
 from sklearn import linear_model
 from sklearn.svm import SVR
 from scipy.stats import iqr
-
 
 import statsmodels.api as sm
 
@@ -69,14 +69,15 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+
 # model initialization: initialization_step=0, use_init_model=false,phase 1, config=2 ,epoch =100
 # model initialization: initialization_step=1, use_init_model=True,phase 1, config=2 ,epoch=300
 # model initialization: initialization_step=2, use_init_model=True,phase 1, config=2,epoch =300
-# phase2 conf 7
-# phase3 conf -1, #create synthetic images
-# phase3 conf -3, #create synthetic images
-# phase4 conf 7 regression -1  #run_FSL= true
-# phase4 conf 7 regression  any
+# phase 2, conf 7
+# phase 3, conf -1, #create SyntheticRealFollowUp
+# phase 3, conf -3, #create syntheticInputImages
+# phase 4, conf 7, train_region_preiction -1 , #run_FSL= true
+# phase 4, conf 7, train_region_preiction  any,
 
 parser = argparse.ArgumentParser(description='DaniNet')
 parser.add_argument('--conf', type=int, default=7)
@@ -91,7 +92,8 @@ parser.add_argument('--use_init_model', type=str2bool, default=True, help='wheth
 parser.add_argument('--slice', type=int, default=100, help='slice')
 parser.add_argument('--super_resolution_3D', type=str2bool, default=True, help='activate 3D super-resolution')
 parser.add_argument('--run_FSL', type=str2bool, default=True, help='run_FSL')
-parser.add_argument('--initialization_step', type=int, default=-1, help='run_FSL')
+parser.add_argument('--initialization_step', type=int, default=-1, help='initialization_step')
+parser.add_argument('--train_region_preiction', type=int, default=-1, help='train_region_preiction')
 
 FLAGS = parser.parse_args()
 
@@ -138,7 +140,7 @@ def main(_):
     type_of_assembly = 0  # 0: input image; 1: no consistecny 2: 3d spatial-consistency
     correct_model_bias = False
     remove_outlier = True
-    type_of_regressor = -1  # linear_regressor = 0,mixed_effect_model = 1,svm = 2
+    train_region_preiction = FLAGS.train_region_preiction  # linear_regressor = 0,mixed_effect_model = 1,svm = 2
     if FLAGS.super_resolution_3D:
         super_resolution_label = '3D'
     else:
@@ -277,7 +279,18 @@ def main(_):
     if FLAGS.phase == 1:
         training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
                  attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
-                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type,initialization_step=FLAGS.initialization_step)
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type, initialization_step=0)
+
+        training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
+                 attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type,
+                 initialization_step=1)
+
+        training(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, progression_enabled=progression_enabled,
+                 attention_loss_function=attention_loss_function, max_regional_expansion=max_regional_expansion, map_disease=map_disease,
+                 age_intervals=age_intervals, V2_enabled=V2_enabled, output_dir='sample_Train', regressor_type=regressor_type,
+                 initialization_step=2)
+
         # testing(curr_slice=FLAGS.slice, conditioned_enabled=conditioned_enabled, output_dir='sample_Test', max_regional_expansion=max_regional_expansion,
         #        map_disease=map_disease, age_intervals=age_intervals, V2_enabled=V2_enabled, regressor_type=regressor_type)
     if FLAGS.phase == 2:
@@ -297,7 +310,7 @@ def main(_):
         else:
             MRI_assembler.assemblyAll(test_label, age_intervals, outputFolder, type_of_assembly, FLAGS)
     if FLAGS.phase == 4:
-        evaluation(outputFolder, FLAGS.run_FSL, type_of_regressor, correct_model_bias, remove_outlier)
+        evaluation(outputFolder, FLAGS.run_FSL, train_region_preiction, correct_model_bias, remove_outlier)
 
 
 def get_follow_up_age(fileName, quaries_for_progression):
@@ -325,7 +338,7 @@ def extract_data_frame(file_list):
     return ID, ages, gender, diagnos
 
 
-def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, remove_outliers):
+def evaluation(outputFolder, run_FSL, train_region_preiction, correct_model_bias, remove_outliers):
     # fsl_bin_dir = '/share/apps/fsl-6.0.1' #server
     number_of_considered_brain_regions = 7
     number_of_parallel_jobs = 12
@@ -343,16 +356,16 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
     for i, file in enumerate(input_files):
         result[i, :] = (extract_volumes('./FLS_RealFollowUp_MRI/', file))
 
-    if type_of_regressor >= 0:
+    if train_region_preiction >= 0:
         synthetic_input_files = glob.glob('./SyntheticRealTest/' + "*.nii*")
         if run_FSL:
             Parallel(n_jobs=number_of_parallel_jobs)(delayed(extract_volumes)(saved_folder, i) for i in synthetic_input_files)
         synthetic_result = np.zeros((np.size(synthetic_input_files), number_of_considered_brain_regions))
 
         for i, file in enumerate(synthetic_input_files):
-          synthetic_result[i, :] = (extract_volumes(saved_folder, file))
+            synthetic_result[i, :] = (extract_volumes(saved_folder, file))
         with open('objs.pkl', 'wb') as f:
-           pickle.dump(synthetic_result, f)
+            pickle.dump(synthetic_result, f)
         f = open('objs.pkl', 'rb')
         synthetic_result = pickle.load(f)
         f.close()
@@ -364,28 +377,29 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
         data = {'ages': ages, 'ID': ID, 'gender': gender, 'diagnos': diagnos, 'vol0': synthetic_result[:, 0], 'vol1': synthetic_result[:, 1],
                 'vol2': synthetic_result[:, 2],
                 'vol3': synthetic_result[:, 3], 'vol4': synthetic_result[:, 4], 'vol5': synthetic_result[:, 5], 'vol6': synthetic_result[:, 5]}
-        tupla = np.concatenate([ages.reshape(1,-1), gender.reshape(1,-1), diagnos.reshape(1,-1)]).T
+        tupla = np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).T
 
         for i in range(number_of_considered_brain_regions):
-            if type_of_regressor == 0:
+            if train_region_preiction == 0:
                 model[i] = linear_model.LinearRegression()
                 model[i].fit(tupla, synthetic_result[:, i])  # linear regressor population based
                 if remove_outliers:
                     clean_tupla = outlierCleaner(model[i].predict(tupla), tupla, synthetic_result[:, i])
                     model[i].fit(np.asarray(clean_tupla[0]), np.asarray(clean_tupla[1]))
-            if type_of_regressor == 1:
+            if train_region_preiction == 1:
                 # vc = {'classroom': '0 + C(classroom)', 'pretest': '0 + pretest', 'ID': '0 + ID'}
                 # >> > MixedLM.from_formula('test_score ~ age + gender + ID', vc_formula=vc,
                 model[i] = smf.mixedlm("vol" + str(i) + "~ages+diagnos+gender+ID", data, groups=(data["diagnos"]))
-                model[i]=model[i].fit()
+                model[i] = model[i].fit()
                 if remove_outliers:
-                    tupla = np.concatenate([ages.reshape(1,-1),np.asarray(ID).reshape(1,-1), gender.reshape(1,-1), diagnos.reshape(1,-1)]).T
+                    tupla = np.concatenate([ages.reshape(1, -1), np.asarray(ID).reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).T
                     data_out = {'ages': ages, 'ID': ID, 'gender': gender, 'diagnos': diagnos}
-                    clean_tupla =outlierCleaner(model[i].predict(data_out),tupla,synthetic_result[:, i])
-                    data_out = {'ages': np.asarray(clean_tupla[0])[:,0], 'ID': np.asarray(clean_tupla[0])[:,1], 'gender': np.asarray(clean_tupla[0])[:,2], 'diagnos': np.asarray(clean_tupla[0])[:,3], 'vol0':clean_tupla[1]}
-                    model[i] = smf.mixedlm("vol0"+ "~ages+diagnos+gender+ID", data_out, groups=(data_out["diagnos"]))
-                    model[i]=model[i].fit()
-            if type_of_regressor == 2:
+                    clean_tupla = outlierCleaner(model[i].predict(data_out), tupla, synthetic_result[:, i])
+                    data_out = {'ages': np.asarray(clean_tupla[0])[:, 0], 'ID': np.asarray(clean_tupla[0])[:, 1], 'gender': np.asarray(clean_tupla[0])[:, 2],
+                                'diagnos': np.asarray(clean_tupla[0])[:, 3], 'vol0': clean_tupla[1]}
+                    model[i] = smf.mixedlm("vol0" + "~ages+diagnos+gender+ID", data_out, groups=(data_out["diagnos"]))
+                    model[i] = model[i].fit()
+            if train_region_preiction == 2:
                 model[i] = SVR(C=10, coef0=0.0, degree=1, epsilon=0.05, gamma='auto',
                                kernel='rbf', max_iter=-1, shrinking=True, tol=0.0001, verbose=True)
                 model[i].fit(tupla, synthetic_result[:, i])
@@ -396,12 +410,12 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
         [ID, ages, gender, diagnos] = extract_data_frame(input_files)
         result2 = np.zeros((np.size(input_files), number_of_considered_brain_regions))
         for i in range(number_of_considered_brain_regions):
-            if type_of_regressor == 0:
+            if train_region_preiction == 0:
                 result2[:, i] = model[i].predict(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).T)
-            if type_of_regressor == 1:
+            if train_region_preiction == 1:
                 data = {'ages': ages, 'ID': ID, 'gender': gender, 'diagnos': diagnos}
                 result2[:, i] = model[i].predict(data)
-            if type_of_regressor == 2:
+            if train_region_preiction == 2:
                 result2[:, i] = model[i].predict(np.concatenate([ages.reshape(1, -1), gender.reshape(1, -1), diagnos.reshape(1, -1)]).T)
     else:
         input_files = glob.glob('./' + outputFolder + '/' + "*.nii*")
@@ -423,9 +437,9 @@ def evaluation(outputFolder, run_FSL, type_of_regressor, correct_model_bias, rem
         if correct_model_bias:
             result[:, j] = result[:, j] - np.mean(totErr[:, j])
             result[:, j] = [0 if a_ < 0 else a_ for a_ in result[:, j]]
-        #index = index + (totErr[:, j] > np.sort(totErr[:, j])[-3])  # remove sample where the estimation of the volumes fails
-        index = index + (totErrAbs[:, j] > (np.median(totErrAbs[:, j]) + 3 * iqr(totErrAbs[:, j])))
-    if np.shape(index)[0]>1:
+        # index = index + (totErr[:, j] > np.sort(totErr[:, j])[-3])  # remove sample where the estimation of the volumes fails
+        index = index + (totErrAbs[:, j] > (np.median(totErrAbs[:, j]) + 1 / 2 * iqr(totErrAbs[:, j])))
+    if np.shape(index)[0] > 1:
         result[index, :] = 0
 
     totErr = np.zeros((np.size(input_files), number_of_considered_brain_regions))
@@ -550,7 +564,7 @@ def extract_volumes(FSL_output, input_file):
 
 
 def training(curr_slice, conditioned_enabled, progression_enabled, attention_loss_function, max_regional_expansion, map_disease, age_intervals, V2_enabled,
-             output_dir, regressor_type,initialization_step):
+             output_dir, regressor_type, initialization_step):
     pprint.pprint(FLAGS)
 
     config = tf.ConfigProto()
